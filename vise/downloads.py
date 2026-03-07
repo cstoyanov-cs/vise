@@ -237,7 +237,8 @@ class Downloads(QObject):
         if len(rates) == 1:
             rate = rates[0]
         else:
-            rate = sum(rates[-100:]) / 100
+            recent = [r for r in rates[-10:] if r >= 0]
+            rate = sum(recent) / len(recent) if recent else -1
         tab.js_func('window.update_download',
                     download_item.id(), state, download_item.receivedBytes(), download_item.totalBytes(), rates[-1], rate)
 
