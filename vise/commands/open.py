@@ -14,11 +14,9 @@ from . import Command
 
 
 def search_engine(q):
-    ans = QUrl('https://duckduckgo.com')
+    ans = QUrl('https://google.com/search')
     # ans = QUrl('https://duckduckgo.com/lite')
-    # ans = QUrl('https://google.com/search')
-
-
+    # ans = QUrl('https://duckduckgo.com')
     qq = QUrlQuery()
     qq.addQueryItem('q', q.replace('+', '%2B'))
     ans.setQuery(qq)
