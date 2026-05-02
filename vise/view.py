@@ -53,14 +53,13 @@ certificate_error_domains = set()
 
 
 class Alert(Dialog):  # {{{
-
     suppressed_alerts: set[str] = set()
 
     def __init__(self, title, qurl, msg, parent):
         title = title or qurl.host() or qurl.toString()
         self.msg = msg
         self.key = qurl.toString()
-        Dialog.__init__(self, _('Alert from') + ': ' + title, 'alert', parent)
+        Dialog.__init__(self, _("Alert from") + ": " + title, "alert", parent)
 
     def setup_ui(self):
         self.lay = lay = QGridLayout(self)
@@ -69,10 +68,13 @@ class Alert(Dialog):  # {{{
         lay.addWidget(la, 0, 0, 1, -1)
         self.setMaximumWidth(self.parent().width())
         self.setMaximumHeight(self.parent().height())
-        self.cb = cb = QCheckBox(_('&Suppress future alerts from this site'), self)
+        self.cb = cb = QCheckBox(_("&Suppress future alerts from this site"), self)
         cb.toggled.connect(self.suppress_toggled)
         lay.addWidget(cb, 1, 0)
-        lay.addWidget(self.bb, 1, 1), self.bb.setStandardButtons(QDialogButtonBox.StandardButton.Close)
+        (
+            lay.addWidget(self.bb, 1, 1),
+            self.bb.setStandardButtons(QDialogButtonBox.StandardButton.Close),
+        )
 
     def suppress_toggled(self):
         if self.cb.isChecked():
@@ -82,39 +84,44 @@ class Alert(Dialog):  # {{{
         ans = Dialog.sizeHint(self)
         ans.setWidth(min(self.maximumWidth(), ans.width() + 150))
         return ans
+
+
 # }}}
 
 
 def edit_text(viewref, text, frame_id, eid):  # {{{
-    defedit = os.environ.get('VISUAL', os.environ.get('EDITOR', 'vim'))
-    defedit = 'kitty ' + defedit
-    editor = shlex.split(misc_config('editor', default=defedit))
-    with NamedTemporaryFile(prefix='vise-edit-file-', suffix='.txt', delete=False) as f:
-        f.write(text.encode('utf-8'))
+    defedit = os.environ.get("VISUAL", os.environ.get("EDITOR", "vim"))
+    defedit = "kitty " + defedit
+    editor = shlex.split(misc_config("editor", default=defedit))
+    with NamedTemporaryFile(prefix="vise-edit-file-", suffix=".txt", delete=False) as f:
+        f.write(text.encode("utf-8"))
     try:
         ret = subprocess.Popen(editor + [f.name]).wait()
         if ret == 0:
-            with open(f.name, 'rb') as f:
-                new_text = f.read().decode('utf-8')
+            with open(f.name, "rb") as f:
+                new_text = f.read().decode("utf-8")
             if new_text != text:
                 view = viewref()
                 if view is not None:
                     view.set_editable_text_in_gui_thread.emit(new_text, frame_id, eid)
     finally:
         os.remove(f.name)
+
+
 # }}}
 
 
 class WebPage(QWebEnginePage):
-
     poll_for_messages = pyqtSignal()
 
     def __init__(self, profile, parent):
         QWebEnginePage.__init__(self, profile, parent)
         self.authenticationRequired.connect(self.authentication_required)
         self.proxyAuthenticationRequired.connect(self.proxy_authentication_required)
-        self.callbacks = {'vise_downloads_page': (self.downloads_callback, (), {})}
-        self.poll_for_messages.connect(self.check_for_messages_from_js, type=Qt.ConnectionType.QueuedConnection)
+        self.callbacks = {"vise_downloads_page": (self.downloads_callback, (), {})}
+        self.poll_for_messages.connect(
+            self.check_for_messages_from_js, type=Qt.ConnectionType.QueuedConnection
+        )
         self.certificateError.connect(self.on_certificate_error)
 
     def register_callback(self, name, func, *args, **kw):
@@ -124,19 +131,22 @@ class WebPage(QWebEnginePage):
         return QApplication.instance().downloads.callback(*args, **kw)
 
     def check_for_messages_from_js(self):
-        self.runJavaScript('try { window.get_messages_from_javascript() } catch(TypeError) {}',
-                           QWebEngineScript.ScriptWorldId.ApplicationWorld, self.messages_received_from_js)
+        self.runJavaScript(
+            "try { window.get_messages_from_javascript() } catch(TypeError) {}",
+            QWebEngineScript.ScriptWorldId.ApplicationWorld,
+            self.messages_received_from_js,
+        )
 
     def messages_received_from_js(self, messages):
-        if messages and messages != '[]':
+        if messages and messages != "[]":
             for msg in json.loads(messages):
-                mtype = msg['type']
-                if mtype == 'callback':
-                    self.called_back(msg['name'], msg['data'])
-                elif mtype == 'js_to_python':
-                    js_to_python(self, msg['name'], msg['args'])
+                mtype = msg["type"]
+                if mtype == "callback":
+                    self.called_back(msg["name"], msg["data"])
+                elif mtype == "js_to_python":
+                    js_to_python(self, msg["name"], msg["args"])
                 else:
-                    print('Unknown message type %s received from javascript' % mtype)
+                    print("Unknown message type %s received from javascript" % mtype)
 
     def called_back(self, name, data):
         try:
@@ -145,11 +155,11 @@ class WebPage(QWebEnginePage):
             pass
         else:
             return func(self.parent(), data, *args, **kw)
-        raise KeyError('No callback named %r is registered' % name)
+        raise KeyError("No callback named %r is registered" % name)
 
     def javaScriptConsoleMessage(self, level, msg, linenumber, source_id):
         try:
-            print('%s:%s: %s' % (source_id, linenumber, msg))
+            print("%s:%s: %s" % (source_id, linenumber, msg))
         except OSError:
             pass
 
@@ -177,21 +187,25 @@ class WebPage(QWebEnginePage):
         get_http_auth_credentials(qurl, authenticator, parent=self.parent())
 
     def proxy_authentication_required(self, qurl, authenticator, proxy_host):
-        get_proxy_auth_credentials(qurl, authenticator, proxy_host, parent=self.parent())
+        get_proxy_auth_credentials(
+            qurl, authenticator, proxy_host, parent=self.parent()
+        )
 
     def javaScriptAlert(self, qurl, msg):
         key = qurl.toString()
         if key in Alert.suppressed_alerts:
-            print('Suppressing alert from:', qurl.toString())
+            print("Suppressing alert from:", qurl.toString())
             return
         self.parent().raise_tab()
         Alert(self.title(), qurl, msg, self.parent()).exec()
 
     def break_cycles(self):
         self.callbacks.clear()
-        for s in ('authenticationRequired proxyAuthenticationRequired linkHovered permissionRequested'
-                  ' fullScreenRequested windowCloseRequested quotaRequested'
-                  ' poll_for_messages audioMutedChanged certificateError').split():
+        for s in (
+            "authenticationRequired proxyAuthenticationRequired linkHovered permissionRequested"
+            " fullScreenRequested windowCloseRequested quotaRequested"
+            " poll_for_messages audioMutedChanged certificateError"
+        ).split():
             safe_disconnect(getattr(self, s))
         # Without the next two lines we get a crash on exit with Qt 5.8.0
         self.setParent(None)
@@ -202,12 +216,12 @@ class WebPage(QWebEnginePage):
             places.on_visit(qurl, navtype, is_main_frame)
         except Exception:
             import traceback
+
             traceback.print_exc()
         return True
 
 
 class WebView(QWebEngineView):
-
     icon_changed = pyqtSignal(object)
     loading_status_changed = pyqtSignal(object)
     focus_changed = pyqtSignal(object, object)
@@ -226,16 +240,26 @@ class WebView(QWebEngineView):
         QWebEngineView.__init__(self, main_window)
         self.host_widget = None
         self.middle_click_soon = 0
-        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)  # needed otherwise object is not deleted on close which means, it keeps running
+        self.setAttribute(
+            Qt.WidgetAttribute.WA_DeleteOnClose
+        )  # needed otherwise object is not deleted on close which means, it keeps running
         self.setMinimumWidth(300)
         self.follow_link_pending = None
-        self.setFocusPolicy(Qt.FocusPolicy(Qt.FocusPolicy.ClickFocus.value | Qt.FocusPolicy.WheelFocus.value))
+        self.setFocusPolicy(
+            Qt.FocusPolicy(
+                Qt.FocusPolicy.ClickFocus.value | Qt.FocusPolicy.WheelFocus.value
+            )
+        )
         self.pending_unserialize = None
         self.main_window = main_window
         self.create_page(profile)
         self.view_id = next(view_id)
-        self.iconChanged.connect(self.on_icon_changed, type=Qt.ConnectionType.QueuedConnection)
-        self.set_editable_text_in_gui_thread.connect(self.set_editable_text, type=Qt.ConnectionType.QueuedConnection)
+        self.iconChanged.connect(
+            self.on_icon_changed, type=Qt.ConnectionType.QueuedConnection
+        )
+        self.set_editable_text_in_gui_thread.connect(
+            self.set_editable_text, type=Qt.ConnectionType.QueuedConnection
+        )
         self.loadStarted.connect(self.load_started)
         self.loadProgress.connect(self.load_progress)
         self.loadFinished.connect(self.load_finished)
@@ -275,24 +299,42 @@ class WebView(QWebEngineView):
         # Workaround for https://bugreports.qt.io/browse/QTBUG-69838
         if self._pending_anchor:
             self._pending_anchor = False
-            self.runjs('''
+            self.runjs("""
             (function() {
                 var h = location.hash;
                 location.hash = '';
                 location.hash = h;
-            }());''')
+            }());""")
 
     def render_process_terminated(self, termination_type, exit_code):
-        if termination_type == QWebEnginePage.RenderProcessTerminationStatus.CrashedTerminationStatus:
+        if (
+            termination_type
+            == QWebEnginePage.RenderProcessTerminationStatus.CrashedTerminationStatus
+        ):
             from .message_box import error_dialog
-            error_dialog(self.parent(), _('Render process crashed'), _(
-                'The render process crashed while displaying the URL: {0} with exit code: {1}').format(
-                    self.url().toString(), exit_code), show=True)
-        elif termination_type == QWebEnginePage.RenderProcessTerminationStatus.AbnormalTerminationStatus:
+
+            error_dialog(
+                self.parent(),
+                _("Render process crashed"),
+                _(
+                    "The render process crashed while displaying the URL: {0} with exit code: {1}"
+                ).format(self.url().toString(), exit_code),
+                show=True,
+            )
+        elif (
+            termination_type
+            == QWebEnginePage.RenderProcessTerminationStatus.AbnormalTerminationStatus
+        ):
             from .message_box import error_dialog
-            error_dialog(self.parent(), _('Render process terminated'), _(
-                'The render process exited abnormally while displaying the URL: {0} with exit code: {1}').format(
-                    self.url().toString(), exit_code), show=True)
+
+            error_dialog(
+                self.parent(),
+                _("Render process terminated"),
+                _(
+                    "The render process exited abnormally while displaying the URL: {0} with exit code: {1}"
+                ).format(self.url().toString(), exit_code),
+                show=True,
+            )
 
     @property
     def dev_tools(self):
@@ -314,7 +356,7 @@ class WebView(QWebEngineView):
 
     @property
     def is_showing_internal_content(self):
-        return self._page.url().scheme() == 'vise'
+        return self._page.url().scheme() == "vise"
 
     def load_started(self):
         self.loading_in_progress = True
@@ -332,14 +374,14 @@ class WebView(QWebEngineView):
         self.loading_in_progress = False
         if self.pending_unserialize is not None:
             state, self.pending_unserialize = self.pending_unserialize, None
-            self.scroll_position = (state['x'], state['y'])
+            self.scroll_position = (state["x"], state["y"])
         else:
             if not self.isVisible() and self._page.url().hasFragment():
                 self._pending_anchor = True
         self.loading_status_changed.emit(False)
         u, ru = self._page.url(), self._page.requestedUrl()
         if u != ru:
-            if u.toString() == 'https' + ru.toString()[4:]:
+            if u.toString() == "https" + ru.toString()[4:]:
                 places.merge_https_places(ru)
 
     @property
@@ -352,15 +394,17 @@ class WebView(QWebEngineView):
         x, y = val
         factor = self.devicePixelRatioF()
         x, y = int(x / factor), int(y / factor)
-        self.runjs(f'window.scrollTo({x}, {y})')
+        self.runjs(f"window.scrollTo({x}, {y})")
 
     def on_title_change(self, title):
         from .settings import TITLE_TOKEN
+
         if title != TITLE_TOKEN:
             try:
                 places.on_title_change(self.url(), title)
             except Exception:
                 import traceback
+
                 traceback.print_exc()
             self.title_changed.emit(title)
         try:
@@ -387,17 +431,17 @@ class WebView(QWebEngineView):
         self._force_passthrough = bool(val)
         self.passthrough_changed.emit(self._force_passthrough, self)
 
-    @connect_signal('element_focused')
+    @connect_signal("element_focused")
     def on_focus_change(self, is_text_input):
         self.text_input_focused = is_text_input
         self.focus_changed.emit(is_text_input, self)
 
     def exit_text_input(self):
-        python_to_js(self, 'exit_text_input')
+        python_to_js(self, "exit_text_input")
         self.text_input_focused = False
         self.focus_changed.emit(False, self)
 
-    @connect_signal('copy_to_clipboard')
+    @connect_signal("copy_to_clipboard")
     def copy_to_clipboard(self, text):
         QApplication.clipboard().setText(text)
 
@@ -410,31 +454,43 @@ class WebView(QWebEngineView):
             p.deny()
             return
         what = {
-            e.MediaAudioCapture: _('microphone'),
-            e.MediaVideoCapture: _('webcam'),
-            e.Notifications: _('notifications'),
-            e.Geolocation: _('current location'),
-            e.MediaAudioVideoCapture: _('microphone and webcam'),
-            e.MouseLock: _('mouse lock'),
-            e.DesktopVideoCapture: _('desktop video capture'),
-            e.DesktopAudioVideoCapture: _('desktop audio/video capture'),
-            e.ClipboardReadWrite: _('clipboard read/write'),
-            e.LocalFontsAccess: _('local fonts access'),
+            e.MediaAudioCapture: _("microphone"),
+            e.MediaVideoCapture: _("webcam"),
+            e.Notifications: _("notifications"),
+            e.Geolocation: _("current location"),
+            e.MediaAudioVideoCapture: _("microphone and webcam"),
+            e.MouseLock: _("mouse lock"),
+            e.DesktopVideoCapture: _("desktop video capture"),
+            e.DesktopAudioVideoCapture: _("desktop audio/video capture"),
+            e.ClipboardReadWrite: _("clipboard read/write"),
+            e.LocalFontsAccess: _("local fonts access"),
         }.get(feature, str(feature))
         origin = p.origin()
+
         def callback(ok: bool, during_shutdown: bool) -> None:
-            if not during_shutdown and not sip.isdeleted(origin) and not sip.isdeleted(self._page) and (profile := self._page.profile()):
+            if (
+                not during_shutdown
+                and not sip.isdeleted(origin)
+                and not sip.isdeleted(self._page)
+                and (profile := self._page.profile())
+            ):
                 p = profile.queryPermission(origin, feature)
                 if ok:
                     p.grant()
                 else:
                     p.deny()
-        self.popup(_('Grant the site {0} access to your <b>{1}</b>?').format(origin.toString(), what), callback)
+
+        self.popup(
+            _("Grant the site {0} access to your <b>{1}</b>?").format(
+                origin.toString(), what
+            ),
+            callback,
+        )
 
     def quota_requested(self, request):
         self.popup(
-            _('Grant this site access to <b>persistent storage</b> of {}?'),
-            lambda ok, during_shutdown: request.accept() if ok else request.reject()
+            _("Grant this site access to <b>persistent storage</b> of {}?"),
+            lambda ok, during_shutdown: request.accept() if ok else request.reject(),
         )
 
     def exit_full_screen(self):
@@ -444,21 +500,31 @@ class WebView(QWebEngineView):
         if not req.toggleOn():
             req.accept()
             return
-        if site_permissions.has_permission(req.origin(), 'full_screen'):
+        if site_permissions.has_permission(req.origin(), "full_screen"):
             req.accept()
             self.toggle_full_screen.emit(req.toggleOn())
         else:
             # Create a copy, see: https://bugreports.qt.io/browse/QTBUG-55064
-            callback = partial(self.on_full_screen_decision, QWebEngineFullScreenRequest(req))
-            q = _('Allow {} to switch to full screen?')
+            callback = partial(
+                self.on_full_screen_decision, QWebEngineFullScreenRequest(req)
+            )
+            q = _("Allow {} to switch to full screen?")
             if not req.toggleOn():
-                q = _('Allow {} to switch out of full screen?')
-            self.popup(q.format(req.origin().toString()), callback, extra_buttons={_('Always'): 'permanent'})
+                q = _("Allow {} to switch out of full screen?")
+            self.popup(
+                q.format(req.origin().toString()),
+                callback,
+                extra_buttons={_("Always"): "permanent"},
+            )
 
-    def on_full_screen_decision(self, req: QWebEngineFullScreenRequest, ok, during_shutdown):
+    def on_full_screen_decision(
+        self, req: QWebEngineFullScreenRequest, ok, during_shutdown
+    ):
         if ok:
             req.accept()
-            site_permissions.add_permission(req.origin(), 'full_screen', permanent=ok == 'permanent')
+            site_permissions.add_permission(
+                req.origin(), "full_screen", permanent=ok == "permanent"
+            )
             if not during_shutdown:
                 self.toggle_full_screen.emit(req.toggleOn())
         else:
@@ -478,8 +544,10 @@ class WebView(QWebEngineView):
         self.callback_on_save_edit_text_node = None
         self.popup.break_cycles()
         self._page.break_cycles()
-        for s in ('resized moved icon_changed loading_status_changed link_hovered urlChanged iconChanged iconUrlChanged renderProcessTerminated'
-                  ' loadStarted loadFinished window_close_requested focus_changed passthrough_changed toggle_full_screen dev_tools_requested').split():
+        for s in (
+            "resized moved icon_changed loading_status_changed link_hovered urlChanged iconChanged iconUrlChanged renderProcessTerminated"
+            " loadStarted loadFinished window_close_requested focus_changed passthrough_changed toggle_full_screen dev_tools_requested"
+        ).split():
             safe_disconnect(getattr(self, s))
 
     def create_page(self, profile):
@@ -492,67 +560,104 @@ class WebView(QWebEngineView):
     def raise_tab(self):
         self.main_window.show_tab(self)
 
-    @connect_signal('middle_click_soon')
+    @connect_signal("middle_click_soon")
     def expecting_middle_click(self):
         self.middle_click_soon = monotonic()
 
     def createWindow(self, window_type):
-        site = '<b>%s</b>' % self.title() or self.url().host() or self.url().toString()
+        site = "<b>%s</b>" % self.title() or self.url().host() or self.url().toString()
         now = monotonic()
-        if window_type == QWebEnginePage.WebWindowType.WebBrowserBackgroundTab or now - self.middle_click_soon < 2 or question_dialog(
-                self, _('Allow new window?'), _('The site {0} wants to open a new tab, allow it?').format(site)):
+        if (
+            window_type == QWebEnginePage.WebWindowType.WebBrowserBackgroundTab
+            or now - self.middle_click_soon < 2
+            or question_dialog(
+                self,
+                _("Allow new window?"),
+                _("The site {0} wants to open a new tab, allow it?").format(site),
+            )
+        ):
             return self.main_window.get_child_tab_for_load()
 
-    def runjs(self, src, callback=None, world_id=QWebEngineScript.ScriptWorldId.ApplicationWorld):
+    def runjs(
+        self,
+        src,
+        callback=None,
+        world_id=QWebEngineScript.ScriptWorldId.ApplicationWorld,
+    ):
         if callback is not None:
             self._page.runJavaScript(src, world_id, callback)
         else:
             self._page.runJavaScript(src, world_id)
 
-    def js_func(self, name, *args, callback=None, world_id=QWebEngineScript.ScriptWorldId.ApplicationWorld):
-        func = '%s(%s)' % (name, ','.join(map(lambda x: json.dumps(x, ensure_ascii=False), args)))
+    def js_func(
+        self,
+        name,
+        *args,
+        callback=None,
+        world_id=QWebEngineScript.ScriptWorldId.ApplicationWorld,
+    ):
+        func = "%s(%s)" % (
+            name,
+            ",".join(map(lambda x: json.dumps(x, ensure_ascii=False), args)),
+        )
         self.runjs(func, callback=callback, world_id=world_id)
 
     def save_page(self, path=None):
         from .downloads import save_page_path_map
+
         self._page.triggerAction(QWebEnginePage.WebAction.SavePage)
         save_page_path_map[self.url().toString()] = path
 
     def print_page(self, path=None):
         if not path:
             path = os.path.join(get_download_dir(), self.title())
-        if not path.lower().endswith('.pdf'):
-            path += '.pdf'
-        size = QPageSize(getattr(QPageSize, misc_config('paper_size', 'A4')))
-        layout = QPageLayout(size, QPageLayout.Orientation.Portrait, QMarginsF(
-            float(misc_config('margin_left', 36)), float(misc_config('margin_top', 36)),
-            float(misc_config('margin_right', 36)), float(misc_config('margin_bottom', 36))))
+        if not path.lower().endswith(".pdf"):
+            path += ".pdf"
+        size = QPageSize(getattr(QPageSize, misc_config("paper_size", "A4")))
+        layout = QPageLayout(
+            size,
+            QPageLayout.Orientation.Portrait,
+            QMarginsF(
+                float(misc_config("margin_left", 36)),
+                float(misc_config("margin_top", 36)),
+                float(misc_config("margin_right", 36)),
+                float(misc_config("margin_bottom", 36)),
+            ),
+        )
         self._page.printToPdf(partial(self.print_done, path), layout)
 
     def print_done(self, path, data):
-        with open(path, 'wb') as f:
+        with open(path, "wb") as f:
             f.write(data.data())
         open_local_file(path)
 
-    @connect_signal('login_form_submitted_in_page')
+    @connect_signal("login_form_submitted_in_page")
     def on_login_form_submit(self, url, username, password):
+        if not misc_config("password_storage", False):
+            return
         if not username or not password:
             return
         key = key_from_url(url)
+
         if password_exclusions.get(key, False):
             return
         if not QApplication.instance().ask_for_master_password(self):
             return
         if key not in password_db:
+
             def store_passwd(ok, during_shutdown):
-                if ok == 'never':
-                    exclude = gprefs.get('never-store-password-for', {})
+                if ok == "never":
+                    exclude = gprefs.get("never-store-password-for", {})
                     exclude[key] = True
                     password_exclusions.set(key, True)
                 elif ok and not during_shutdown:
                     QApplication.instance().store_password(url, username, password)
-            self.popup(_('Remember password for: {0}?').format(key),
-                       store_passwd, {_('Never'): 'never'})
+
+            self.popup(
+                _("Remember password for: {0}?").format(key),
+                store_passwd,
+                {_("Never"): "never"},
+            )
         else:
             QApplication.instance().store_password(url, username, password)
 
@@ -565,6 +670,8 @@ class WebView(QWebEngineView):
         self.on_login_form_found(url, True)
 
     def get_login_credentials(self, url):
+        if not misc_config("password_storage", False):
+            return
         # return {'password': 'testpw', 'autologin': False, 'username': 'testuser', 'notes': None}
         if not QApplication.instance().ask_for_master_password(self):
             return
@@ -577,7 +684,7 @@ class WebView(QWebEngineView):
     def event(self, event):
         if event.type() == QEvent.Type.ChildPolished:
             child = event.child()
-            if 'QQuickWidget' in child.metaObject().className():
+            if "QQuickWidget" in child.metaObject().className():
                 self.host_widget = child
         return QWebEngineView.event(self, event)
 
@@ -586,8 +693,13 @@ class WebView(QWebEngineView):
             self.host_widget.setFocus(Qt.FocusReason.OtherFocusReason)
             with QApplication.instance().key_filter.disable_filtering:
                 for ch in text:
-                    key = getattr(Qt, f'Key_{ch.upper()}', Qt.Key.Key_A)
-                    QApplication.sendEvent(self.host_widget, QKeyEvent(QEvent.Type.KeyPress, key, Qt.KeyboardModifier(0), ch))
+                    key = getattr(Qt, f"Key_{ch.upper()}", Qt.Key.Key_A)
+                    QApplication.sendEvent(
+                        self.host_widget,
+                        QKeyEvent(
+                            QEvent.Type.KeyPress, key, Qt.KeyboardModifier(0), ch
+                        ),
+                    )
                 # Ensure key events are delivered before any other processing
                 while QApplication.instance().processEvents():
                     pass
@@ -599,15 +711,21 @@ class WebView(QWebEngineView):
         ac = self.get_login_credentials(url)
         if ac is not None:
             if self.send_text_using_keys(ac[which]):
-                python_to_js(self, 'form_field_filled', url, which)
+                python_to_js(self, "form_field_filled", url, which)
 
     def on_login_form_found(self, url, is_current_form):
         ac = self.get_login_credentials(url)
         if ac is not None:
-            python_to_js(self, 'autofill_login_form', url, ac['autologin'], is_current_form)
+            python_to_js(
+                self, "autofill_login_form", url, ac["autologin"], is_current_form
+            )
 
     def find_text(self, text, callback=None, forward=True):
-        flags = QWebEnginePage.FindFlag(0) if forward else QWebEnginePage.FindFlag.FindBackward
+        flags = (
+            QWebEnginePage.FindFlag(0)
+            if forward
+            else QWebEnginePage.FindFlag.FindBackward
+        )
         self.find_text_data = [text, callback]
         if callback is None:
             self._page.findText(text, flags)
@@ -624,25 +742,29 @@ class WebView(QWebEngineView):
         x, y = self.scroll_position
         sz = self._page.contentsSize()
         ans = {
-            'x': x, 'y': y,
-            'width': sz.width(), 'height': sz.height(),
-            'zoom_factor': self.zoom_factor,
-            'title': self.title(),
-            'url': self._page.url().toString(),
-            'audio_muted': self._page.isAudioMuted(),
-            'view_id': self.view_id,
+            "x": x,
+            "y": y,
+            "width": sz.width(),
+            "height": sz.height(),
+            "zoom_factor": self.zoom_factor,
+            "title": self.title(),
+            "url": self._page.url().toString(),
+            "audio_muted": self._page.isAudioMuted(),
+            "view_id": self.view_id,
         }
         if include_favicon:
             ic = icon_to_data(self.icon())
             if ic:
-                ans['favicon'] = 'data:image/png;base64,' + standard_b64encode(ic).decode('ascii')
+                ans["favicon"] = "data:image/png;base64," + standard_b64encode(
+                    ic
+                ).decode("ascii")
 
         return ans
 
     def unserialize_state(self, state):
-        self.load(QUrl(state['url']))
-        self.setZoomFactor(state['zoom_factor'])
-        self.muted = state['audio_muted']
+        self.load(QUrl(state["url"]))
+        self.setZoomFactor(state["zoom_factor"])
+        self.muted = state["audio_muted"]
         self.pending_unserialize = state
 
     @property
@@ -655,12 +777,12 @@ class WebView(QWebEngineView):
 
     def start_follow_link(self, action):
         self.follow_link_pending = action
-        python_to_js(self, 'start_follow_link', action)
+        python_to_js(self, "start_follow_link", action)
 
     def follow_link(self, key):
         jkey = FOLLOW_LINK_KEY_MAP.get(key.key())
         if jkey is not None:
-            python_to_js(self, 'follow_link', jkey)
+            python_to_js(self, "follow_link", jkey)
             return True
 
     @connect_signal()
@@ -668,25 +790,31 @@ class WebView(QWebEngineView):
         if ok:
             self.follow_link_pending = None
         else:
-            if text == '|escape':
+            if text == "|escape":
                 self.follow_link_pending = None
                 return
-            self.main_window.show_status_message(_('No match for %s!') % text, 5000, 'error')
+            self.main_window.show_status_message(
+                _("No match for %s!") % text, 5000, "error"
+            )
 
     def set_editable_text(self, *args):
-        python_to_js(self, 'set_editable_text', *args)
+        python_to_js(self, "set_editable_text", *args)
 
     @connect_signal()
     def edit_text(self, text, frame_id, eid):
         ref = weakref.ref(self)
-        t = Thread(name='EditText', target=edit_text, args=(ref, text, frame_id, eid))
+        t = Thread(name="EditText", target=edit_text, args=(ref, text, frame_id, eid))
         t.daemon = True
         t.start()
 
     @connect_signal()
-    def save_text_edit_node(self, selection_start, selection_end, source_frame_id, node_id):
+    def save_text_edit_node(
+        self, selection_start, selection_end, source_frame_id, node_id
+    ):
         if self.callback_on_save_edit_text_node is not None:
-            self.callback_on_save_edit_text_node(selection_start, selection_end, source_frame_id, node_id)
+            self.callback_on_save_edit_text_node(
+                selection_start, selection_end, source_frame_id, node_id
+            )
 
     def trigger_inspect(self):
         if not self.dev_tools_enabled:
@@ -694,8 +822,10 @@ class WebView(QWebEngineView):
         self._page.triggerAction(QWebEnginePage.WebAction.InspectElement)
 
     def contextMenuEvent(self, ev):
-        self.middle_click_soon = monotonic() + 2  # so that voew page source does not popup a confirmation
+        self.middle_click_soon = (
+            monotonic() + 2
+        )  # so that voew page source does not popup a confirmation
         menu = self.createStandardContextMenu()
         menu.addSeparator()
-        menu.addAction(_('Inspect element'), self.trigger_inspect)
+        menu.addAction(_("Inspect element"), self.trigger_inspect)
         menu.exec(ev.globalPos())

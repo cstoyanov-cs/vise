@@ -146,6 +146,8 @@ margin_bottom: 36 # pts
 # environment variable EDITOR.
 editor: default
 # The directory to download files to.
-download_dir: ~/downloads
+download_dir: ~/Téléchargements/
 # The format in which to store saved HTML pages. Choices are: files, mhtml
 save_format: files
+# Disable password_storage
+password_storage: false
