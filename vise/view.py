@@ -670,7 +670,7 @@ class WebView(QWebEngineView):
         self.on_login_form_found(url, True)
 
     def get_login_credentials(self, url):
-         if not is_password_storage_enabled():
+        if not is_password_storage_enabled():
             return
         # return {'password': 'testpw', 'autologin': False, 'username': 'testuser', 'notes': None}
         if not QApplication.instance().ask_for_master_password(self):
