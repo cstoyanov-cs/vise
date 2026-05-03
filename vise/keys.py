@@ -2,7 +2,7 @@
 # vim:fileencoding=utf-8
 # License: GPL v3 Copyright: 2015, Kovid Goyal <kovid at kovidgoyal.net>
 
-from PyQt6.QtCore import QEvent, QObject, Qt, QKeyCombination
+from PyQt6.QtCore import QEvent, QObject, Qt
 from PyQt6.QtGui import QKeySequence
 from PyQt6.QtWidgets import QApplication, QDialog, QLineEdit, QMainWindow
 
@@ -11,10 +11,18 @@ from .ask import Ask
 from .config import load_config
 
 modifiers_mask = (
-    Qt.KeyboardModifier.ShiftModifier | Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.AltModifier | Qt.KeyboardModifier.MetaModifier
+    Qt.KeyboardModifier.ShiftModifier
+    | Qt.KeyboardModifier.ControlModifier
+    | Qt.KeyboardModifier.AltModifier
+    | Qt.KeyboardModifier.MetaModifier
 ).value
 
-all_keys = {v.value: k for k, v in Qt.Key.__members__.items() if k.startswith('Key_') and k not in {'Key_Alt', 'Key_Meta', 'Key_Control', 'Key_Shift'}}
+all_keys = {
+    v.value: k
+    for k, v in Qt.Key.__members__.items()
+    if k.startswith("Key_")
+    and k not in {"Key_Alt", "Key_Meta", "Key_Control", "Key_Shift"}
+}
 
 
 def only_modifiers(key):
@@ -27,14 +35,27 @@ def key_from_event(ev):
 
 
 def key_to_string(key):
-    return QKeySequence(key).toString().encode('utf-8', 'ignore').decode('utf-8')
+    return QKeySequence(key).toString().encode("utf-8", "ignore").decode("utf-8")
 
 
 normal_key_map, input_key_map = {}, {}
 
 
-def read_key_map(mode='normal'):
-    km = mode + ' mode keys'
+def parse_shortcut(s):
+    if len(s) == 1 and s.isprintable():
+        return ord(s.upper())
+    return QKeySequence.fromString(s)[0].toCombined()
+
+
+def keyevent_to_code(ev):
+    text = ev.text()
+    if text and text.isprintable():  # <-- ajouter isprintable()
+        return ord(text.upper())
+    return ev.key() | int(ev.modifiers().value)
+
+
+def read_key_map(mode="normal"):
+    km = mode + " mode keys"
     dkm, ukm = load_config(user=False)[km], load_config(user=True).get(km) or {}
 
     def get_keys(x):
@@ -42,7 +63,7 @@ def read_key_map(mode='normal'):
             x = [x]
         for k in x:
             if isinstance(k, str):
-                yield QKeySequence.fromString(k)[0]
+                yield parse_shortcut(k)
 
     key_map = {}
     for action, x in ukm.items():
@@ -62,13 +83,13 @@ def read_key_map(mode='normal'):
 
 
 normal_key_map = read_key_map()
-input_key_map = read_key_map('insert')
+input_key_map = read_key_map("insert")
 
 
 def passthrough_keys(widget):
     if widget is None:
         return True
-    if getattr(widget, 'passthrough_keys', False):
+    if getattr(widget, "passthrough_keys", False):
         return True
     p = widget.parent()
     while p:
@@ -79,7 +100,6 @@ def passthrough_keys(widget):
 
 
 class KeyFilter(QObject):
-
     def __init__(self, parent=None):
         QObject.__init__(self, parent)
         self.disabled = False
@@ -104,53 +124,62 @@ class KeyFilter(QObject):
 
             if isinstance(fw, QLineEdit) and isinstance(fw.parent(), Ask):
                 # Prevent tabbing out of line edit
-                key = key_from_event(event)
-                if key in (Qt.Key.Key_Tab, Qt.Key.Key_Backtab, Qt.KeyboardModifier.ShiftModifier | Qt.Key.Key_Backtab):
+                key = keyevent_to_code(event)
+                if key in (
+                    Qt.Key.Key_Tab,
+                    Qt.Key.Key_Backtab,
+                    Qt.KeyboardModifier.ShiftModifier | Qt.Key.Key_Tab,
+                ):
                     fw.parent().keyPressEvent(event)
                     return True
 
-            if fw is None and hasattr(window, 'current_tab'):
+            if fw is None and hasattr(window, "current_tab"):
                 ct = window.current_tab
                 if ct is not None:
                     ct.setFocus(Qt.FocusReason.OtherFocusReason)
                     fw = QApplication.instance().focusWidget()
 
             if isinstance(window, QMainWindow) and not passthrough_keys(fw):
-                key = key_from_event(event)
+                key = keyevent_to_code(event)
 
                 if window.quickmark_pending:
                     if only_modifiers(key):
                         return True
-                    window.quickmark(QKeyCombination.fromCombined(key))
+                    window.quickmark(key)
                     return True
 
                 if window.choose_tab_pending:
                     if only_modifiers(key):
                         return True
-                    window.choose_tab(QKeyCombination.fromCombined(key))
+                    window.choose_tab(key)
                     return True
 
                 ct = window.current_tab
                 if ct is not None:
-
+                    print(
+                        f"DEBUG: ct exists, text_input_focused={ct.text_input_focused}, key={key}"
+                    )
                     if ct.force_passthrough:
                         return False
 
                     if ct.follow_link_pending:
                         if only_modifiers(key):
                             return True
-                        if ct.follow_link(QKeyCombination.fromCombined(key)):
+                        if ct.follow_link(key):
                             return True
 
                     if ct.text_input_focused:
-                        action = input_key_map.get(QKeyCombination.fromCombined(key))
+                        print(
+                            f"DEBUG: text_input_focused=True, key={key}, input_key_map.get(key)={input_key_map.get(key)}"
+                        )
+                        action = input_key_map.get(key)
                         if action is not None:
                             swallow = action(window, fw, self)
                             if swallow is True:
                                 return True
                         return False
 
-                action = normal_key_map.get(QKeyCombination.fromCombined(key))
+                action = normal_key_map.get(key)
                 if action is not None:
                     swallow = action(window, fw, self)
                     if swallow is True:
