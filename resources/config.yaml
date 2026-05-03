@@ -34,7 +34,7 @@ normal mode keys:  # The keys used in normal mode
         - 'Shift+?'
     next_match: N
     prev_match: Shift+N
-    set_passthrough_mode: Ctrl+Z
+    set_passthrough_mode: Ctrl+J
     quickmark: G
     quickmark_newtab: Shift+G
     scroll_line_down: J

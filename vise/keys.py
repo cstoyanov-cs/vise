@@ -156,9 +156,6 @@ class KeyFilter(QObject):
 
                 ct = window.current_tab
                 if ct is not None:
-                    print(
-                        f"DEBUG: ct exists, text_input_focused={ct.text_input_focused}, key={key}"
-                    )
                     if ct.force_passthrough:
                         return False
 
@@ -169,9 +166,6 @@ class KeyFilter(QObject):
                             return True
 
                     if ct.text_input_focused:
-                        print(
-                            f"DEBUG: text_input_focused=True, key={key}, input_key_map.get(key)={input_key_map.get(key)}"
-                        )
                         action = input_key_map.get(key)
                         if action is not None:
                             swallow = action(window, fw, self)
