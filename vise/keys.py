@@ -49,7 +49,7 @@ def parse_shortcut(s):
 
 def keyevent_to_code(ev):
     text = ev.text()
-    if text and text.isprintable():  # <-- ajouter isprintable()
+    if text and text.isprintable():
         return ord(text.upper())
     return ev.key() | int(ev.modifiers().value)
 
