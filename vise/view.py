@@ -36,7 +36,7 @@ from PyQt6.QtWidgets import (
 from .auth import get_http_auth_credentials, get_proxy_auth_credentials
 from .certs import cert_exceptions
 from .communicate import connect_signal, js_to_python, python_to_js
-from .config import misc_config
+from .config import misc_config, is_password_storage_enabled
 from .constants import FOLLOW_LINK_KEY_MAP
 from .dev_tools import DevTools
 from .downloads import get_download_dir
@@ -633,7 +633,7 @@ class WebView(QWebEngineView):
 
     @connect_signal("login_form_submitted_in_page")
     def on_login_form_submit(self, url, username, password):
-        if not misc_config("password_storage", False):
+        if not is_password_storage_enabled():
             return
         if not username or not password:
             return
@@ -670,7 +670,7 @@ class WebView(QWebEngineView):
         self.on_login_form_found(url, True)
 
     def get_login_credentials(self, url):
-        if not misc_config("password_storage", False):
+         if not is_password_storage_enabled():
             return
         # return {'password': 'testpw', 'autologin': False, 'username': 'testuser', 'notes': None}
         if not QApplication.instance().ask_for_master_password(self):

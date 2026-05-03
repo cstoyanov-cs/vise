@@ -14,19 +14,19 @@ from .resources import get_data_as_file
 @lru_cache()
 def load_config(user=False):
     if user:
-        p = os.path.join(config_dir, 'config.yaml')
+        p = os.path.join(config_dir, "config.yaml")
         try:
-            with open(p, 'rb') as f:
+            with open(p, "rb") as f:
                 return safe_load(f)
         except FileNotFoundError:
             return {}
-    return safe_load(get_data_as_file('config.yaml'))
+    return safe_load(get_data_as_file("config.yaml"))
 
 
 @lru_cache()
 def font_families():
-    uff = (load_config(user=True).get('fonts') or {}).get('families') or {}
-    dff = load_config(user=False)['fonts']['families']
+    uff = (load_config(user=True).get("fonts") or {}).get("families") or {}
+    dff = load_config(user=False)["fonts"]["families"]
     families = {}
 
     def get_ff(x):
@@ -50,12 +50,12 @@ def font_families():
 
 @lru_cache()
 def font_sizes():
-    uff = (load_config(user=True).get('fonts') or {}).get('sizes') or {}
-    dff = load_config(user=False)['fonts']['sizes']
+    uff = (load_config(user=True).get("fonts") or {}).get("sizes") or {}
+    dff = load_config(user=False)["fonts"]["sizes"]
     sizes = {}
 
     def conv(x):
-        if x == 'default':
+        if x == "default":
             return 0
         try:
             return int(x)
@@ -64,7 +64,7 @@ def font_sizes():
 
     def get_ff(x):
         if isinstance(x, dict):
-            return conv(x.get(hostname) or x.get('*'))
+            return conv(x.get(hostname) or x.get("*"))
         return conv(x)
 
     for ftype, val in uff.items():
@@ -83,8 +83,8 @@ def font_sizes():
 
 @lru_cache()
 def colors():
-    uc = load_config(user=True).get('colors') or {}
-    dc = load_config(user=False)['colors']
+    uc = load_config(user=True).get("colors") or {}
+    dc = load_config(user=False)["colors"]
     ans = dc.copy()
     ans.update(uc)
     return ans
@@ -92,7 +92,7 @@ def colors():
 
 def color(key, default):
     ans = colors().get(key)
-    if not ans or ans == 'default':
+    if not ans or ans == "default":
         ans = default
     return ans
 
@@ -100,6 +100,10 @@ def color(key, default):
 @lru_cache()
 def misc_config(key, default=None):
     u = load_config(user=True).get(key) or load_config(user=False).get(key)
-    if not u or u == 'default':
+    if not u or u == "default":
         u = default
     return u
+
+
+def is_password_storage_enabled():
+    return misc_config("password_storage", False)
