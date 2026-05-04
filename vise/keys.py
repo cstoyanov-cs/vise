@@ -51,7 +51,7 @@ def keyevent_to_code(ev):
     text = ev.text()
     modifiers = int(ev.modifiers().value) & modifiers_mask
     if text and text.isprintable():
-        return ord(text.upper()) | modifiers
+        return ord(text.upper())
     return ev.key() | modifiers
 
 
