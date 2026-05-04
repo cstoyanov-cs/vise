@@ -8,7 +8,6 @@ from PyQt6.QtWidgets import QApplication, QDialog, QLineEdit, QMainWindow
 
 from . import actions
 from .ask import Ask
-from .constants import FOLLOW_LINK_KEY_MAP
 from .config import load_config
 
 modifiers_mask = (
