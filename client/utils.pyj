@@ -29,16 +29,13 @@ def is_visible(elem):
         return False
     win = elem.ownerDocument.defaultView
     rect = elem.getBoundingClientRect()
-
     if not rect or rect.bottom < 0 or rect.top > win.innerHeight or rect.left > win.innerWidth or rect.right < 0:
         return False  # Not in viewport
-
     if not rect.width or not rect.height:
         for child in elem.childNodes:
             if child.nodeType is child.ELEMENT_NODE and win.getComputedStyle(child).float is not 'none' and is_visible(child):
                 return True  # Has visible floating child
         return False  # is zero width or zero height
-
     s = win.getComputedStyle(elem)
     if not s or s.visibility is not "visible" or s.display is "none":
         return False
@@ -63,6 +60,15 @@ def follow_link(elem, mouse_button=0):
 def text_editing_allowed(node):
     return not node.hasAttribute('readonly') and not node.hasAttribute('disabled')
 
+def is_content_editable(node):
+    current = node
+    while current:
+        attr = current.getAttribute('contenteditable')
+        if attr is not None:
+            return attr.toLowerCase() == 'true'
+        current = current.parentElement
+    return False
+
 def is_text_input_node(node):
     if node and node.nodeType is Node.ELEMENT_NODE:
         name = node.nodeName.toUpperCase()
@@ -72,5 +78,7 @@ def is_text_input_node(node):
             itype = (node.getAttribute('type') or '').toLowerCase()
             if itype not in {'hidden', 'image', 'button', 'reset', 'file', 'reset', 'radio', 'submit'}:
                 return text_editing_allowed(node)
+        # Check for contenteditable elements
+        if is_content_editable(node):
+            return True
     return False
-
