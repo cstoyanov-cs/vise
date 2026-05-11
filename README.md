@@ -12,20 +12,15 @@ common denominator usage, that is no longer good enough.
 
 Features
 ----------
+The features/fixes I added to Vise:
+*   **Fix keyboard shortcut system for AZERTY layouts**
+    Refactored key event handling to use character strings instead of Qt.Key integer keycodes for printable characters, enabling correct distinction between uppercase and lowercase shortcuts (e.g. `o` vs `O`) and proper support for AZERTY digit input without numpad.
+*   **Implement the possibility to desactivate storage passwords system**
+    You can toggle the storage password system to `true`/`false` directly in `config.yaml` using `password_storage: true/false` (`false` is default).
+*   **Add a queue system to the database to handle writing requests**
+    This system guarantees only one access of the database at a time, avoiding errors such as: `ERROR: Unhandled exception: Connection is busy in another thread`
 
-Added features / fixes
-----------
-
-*   Fix keyboard shortcut system for AZERTY layouts. It should work now with any kind of keyboard layouts (tested only one AZERTY though)
-    Refactored key event handling to use character strings instead of Qt.Key integer keycodes for printable characters, enabling correct distinction between uppercase and lowercase shortcuts (e.g. o vs O) and proper support for AZERTY digit input without numpad.
-
-*   Implement the possibility to desactivate storage passwords system
-    You can toggle the storage password system to true/false directly in config.yaml using password_storage: true/false (false is default)
-
-Native features
-----------
-
-Here is a list of Vise features
+Here is a list of Vise original features:
 
  * Easy navigation through history by substring matching using the keyboard
 
