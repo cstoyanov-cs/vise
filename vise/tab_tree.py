@@ -37,7 +37,7 @@ for x in string.digits + string.ascii_uppercase:
     mark_map[x] = getattr(Qt.Key, 'Key_' + x)
 for x in string.ascii_uppercase:
     mark_map[x] = getattr(Qt.Key, 'Key_' + x) | Qt.KeyboardModifier.ShiftModifier
-mark_rmap = {v.toCombined() if hasattr(v, 'toCombined') else v.value: k for k, v in mark_map.items()}
+mark_map = dict.fromkeys(string.digits + string.ascii_uppercase)
 
 
 def missing_icon():
@@ -569,8 +569,8 @@ class TabTree(QTreeWidget):
                 item = self.itemBelow(item)
 
     def activate_marked_tab(self, key):
-        m = mark_rmap.get(key.toCombined())
-        if m is None:
+        m = key.upper() if isinstance(key, str) else None
+        if m is None or m not in mark_map:
             return False
         for item in self:
             if item.data(0, MARK_ROLE) == m:
