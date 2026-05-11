@@ -1,6 +1,8 @@
 Vise
 ======
 
+This repo is a fork from Kovid Goyal original project. I forked it because I needed custom changes for my personal use. And some fixes so it can work with my setup.
+
 A keyboard driven browser with tabs in a tree. Uses an embedded chromium
 instance (via QtWebEngine) for the actual rendering. I got tired of
 depending on fragile, cobbled together, poorly integrated solutions based on
@@ -11,7 +13,19 @@ common denominator usage, that is no longer good enough.
 Features
 ----------
 
-Here is a list of features that I intend this browser to have
+Added features / fixes
+----------
+
+*   Fix keyboard shortcut system for AZERTY layouts. It should work now with any kind of keyboard layouts (tested only one AZERTY though)
+    Refactored key event handling to use character strings instead of Qt.Key integer keycodes for printable characters, enabling correct distinction between uppercase and lowercase shortcuts (e.g. o vs O) and proper support for AZERTY digit input without numpad.
+
+*   Implement the possibility to desactivate storage passwords system
+    You can toggle the storage password system to true/false directly in config.yaml using password_storage: true/false (false is default)
+
+Native features
+----------
+
+Here is a list of Vise features
 
  * Easy navigation through history by substring matching using the keyboard
 
@@ -51,13 +65,3 @@ python3 ~/work/vise
 ```
 
 
-
-Ad blocking
-------------
-
-While it was originally my plan to add integrated ad-blocking to vise, I
-decided against it, since a better solution is to use either a system-wide (or
-better network-wide) hosts blacklist, for example:
-https://github.com/StevenBlack/hosts or use a system-wide privacy enabled
-proxy, such a privoxy. These solutions have the advantage of working across all
-applications, not just the browser.
