@@ -13,6 +13,10 @@ common denominator usage, that is no longer good enough.
 Features
 ----------
 The features/fixes I added to Vise:
+
+
+*   **Improve the auto-detection of INSERT MODE needs**
+    Now vise detect a lot more content editable content feilds and auto-apply insert mode to it.
 *   **Fix keyboard shortcut system for AZERTY layouts**
     Refactored key event handling to use character strings instead of Qt.Key integer keycodes for printable characters, enabling correct distinction between uppercase and lowercase shortcuts (e.g. `o` vs `O`) and proper support for AZERTY digit input without numpad.
 *   **Implement the possibility to desactivate storage passwords system**
