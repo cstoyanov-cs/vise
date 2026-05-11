@@ -63,16 +63,21 @@ def remove_hint_markup(elem):
 
 def mark_visible_hints(action, frame_id=0):
     hints = v'[]'
-    sel = 'a[href], button, input, textarea'
+    sel = 'a[href], button, input:not([type=hidden]):not([disabled]), select, textarea, [onclick], [onmousedown], [onmouseup], [oncommand], [tabindex], [role=button], [role=link], [role=menuitem], [role=menuitemradio], [role=menuitemcheckbox], [role=tab], [role=treeitem], [role=checkbox], [role=radio], [contenteditable=true]'
     if action is 'copy':
         sel = 'a[href]'
-    for i, elem in enumerate(document.querySelectorAll(sel)):
-        if is_visible(elem):
+    
+    all_elems = document.querySelectorAll(sel)
+    
+    for i, elem in enumerate(all_elems):
+        br = elem.getBoundingClientRect()
+        vis = is_visible(elem)
+        if vis:
             add_hint_markup(elem, i)
-            br = elem.getBoundingClientRect()
             hints.push({'frame_id':frame_id, 'num':i, 'left':br.left, 'top':br.top})
         else:
             remove_hint_markup(elem)
+    
     return hints
 
 def assign_hints():
