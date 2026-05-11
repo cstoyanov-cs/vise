@@ -25,14 +25,12 @@ DOWNLOADS_URL = "vise:downloads"
 WELCOME_URL = "vise:welcome"
 hostname = os.environ.get("VISE_HOSTNAME", socket.gethostname())
 STATUS_BAR_HEIGHT = 24
-FOLLOW_LINK_KEY_MAP = {
-    getattr(Qt.Key, "Key_" + x.upper()).value: x
-    for x in string.ascii_lowercase + string.digits
+FOLLOW_LINK_KEY_MAP: dict[str | int, str] = {
+    x: x for x in string.ascii_lowercase + string.ascii_uppercase + string.digits
 }
-FOLLOW_LINK_KEY_MAP[Qt.Key.Key_Escape.value] = "|escape"
-FOLLOW_LINK_KEY_MAP[Qt.Key.Key_Enter.value] = FOLLOW_LINK_KEY_MAP[
-    Qt.Key.Key_Return.value
-] = "|enter"
+FOLLOW_LINK_KEY_MAP[Qt.Key.Key_Escape.value] = '|escape'
+FOLLOW_LINK_KEY_MAP[Qt.Key.Key_Enter.value] = '|enter'
+FOLLOW_LINK_KEY_MAP[Qt.Key.Key_Return.value] = '|enter'
 VISE_SCHEME = "vise"
 
 
