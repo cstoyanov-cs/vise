@@ -9,38 +9,42 @@ import string
 
 from PyQt6.QtCore import QStandardPaths, Qt
 
-appname = 'vise'
+appname = "vise"
 numeric_version = (0, 1, 0)
-version = str_version = '.'.join(map(str, numeric_version))
+version = str_version = ".".join(map(str, numeric_version))
 
 _plat = sys.platform.lower()
-iswindows = 'win32' in _plat or 'win64' in _plat
-isosx = 'darwin' in _plat
-isfreebsd = 'freebsd' in _plat
-isnetbsd = 'netbsd' in _plat
-isdragonflybsd = 'dragonfly' in _plat
+iswindows = "win32" in _plat or "win64" in _plat
+isosx = "darwin" in _plat
+isfreebsd = "freebsd" in _plat
+isnetbsd = "netbsd" in _plat
+isdragonflybsd = "dragonfly" in _plat
 isbsd = isfreebsd or isnetbsd or isdragonflybsd
 islinux = not (iswindows or isosx or isbsd)
-DOWNLOADS_URL = 'vise:downloads'
-WELCOME_URL = 'vise:welcome'
-hostname = os.environ.get('VISE_HOSTNAME', socket.gethostname())
+DOWNLOADS_URL = "vise:downloads"
+WELCOME_URL = "vise:welcome"
+hostname = os.environ.get("VISE_HOSTNAME", socket.gethostname())
 STATUS_BAR_HEIGHT = 24
-FOLLOW_LINK_KEY_MAP = {getattr(Qt.Key, 'Key_' + x.upper()): x for x in string.ascii_lowercase + string.digits}
-FOLLOW_LINK_KEY_MAP[Qt.Key.Key_Escape] = '|escape'
-FOLLOW_LINK_KEY_MAP[Qt.Key.Key_Enter] = FOLLOW_LINK_KEY_MAP[Qt.Key.Key_Return] = '|enter'
-VISE_SCHEME = 'vise'
+FOLLOW_LINK_KEY_MAP: dict[str | int, str] = {
+    x: x for x in string.ascii_lowercase + string.ascii_uppercase + string.digits
+}
+FOLLOW_LINK_KEY_MAP[Qt.Key.Key_Escape.value] = '|escape'
+FOLLOW_LINK_KEY_MAP[Qt.Key.Key_Enter.value] = '|enter'
+FOLLOW_LINK_KEY_MAP[Qt.Key.Key_Return.value] = '|enter'
+VISE_SCHEME = "vise"
 
 
 def _get_cache_dir():
-    if 'VISE_CACHE_DIRECTORY' in os.environ:
-        return os.path.abspath(os.path.expanduser(os.environ['VISE_CACHE_DIRECTORY']))
+    if "VISE_CACHE_DIRECTORY" in os.environ:
+        return os.path.abspath(os.path.expanduser(os.environ["VISE_CACHE_DIRECTORY"]))
 
-    candidate = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.CacheLocation)
+    candidate = QStandardPaths.writableLocation(
+        QStandardPaths.StandardLocation.CacheLocation
+    )
     if not candidate and not iswindows and not isosx:
-        candidate = os.path.expanduser(os.environ.get('XDG_CACHE_HOME', u'~/.cache'))
+        candidate = os.path.expanduser(os.environ.get("XDG_CACHE_HOME", "~/.cache"))
     if not candidate:
-        raise RuntimeError(
-            'Failed to find path for application cache directory')
+        raise RuntimeError("Failed to find path for application cache directory")
     ans = os.path.join(candidate, appname)
     try:
         os.makedirs(ans)
@@ -54,18 +58,21 @@ del _get_cache_dir
 
 
 def _get_config_dir():
-    if 'VISE_CONFIG_DIRECTORY' in os.environ:
-        return os.path.abspath(os.path.expanduser(os.environ['VISE_CONFIG_DIRECTORY']))
+    if "VISE_CONFIG_DIRECTORY" in os.environ:
+        return os.path.abspath(os.path.expanduser(os.environ["VISE_CONFIG_DIRECTORY"]))
 
-    candidate = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.ConfigLocation)
+    candidate = QStandardPaths.writableLocation(
+        QStandardPaths.StandardLocation.ConfigLocation
+    )
     if not candidate:
         if isosx:
-            candidate = os.path.expanduser('~/Library/Preferences')
+            candidate = os.path.expanduser("~/Library/Preferences")
         elif not iswindows:
-            candidate = os.path.expanduser(os.environ.get('XDG_CONFIG_HOME', u'~/.config'))
+            candidate = os.path.expanduser(
+                os.environ.get("XDG_CONFIG_HOME", "~/.config")
+            )
     if not candidate:
-        raise RuntimeError(
-            'Failed to find path for application config directory')
+        raise RuntimeError("Failed to find path for application config directory")
     ans = os.path.join(candidate, appname)
     try:
         os.makedirs(ans)
@@ -79,15 +86,16 @@ del _get_config_dir
 
 
 def get_windows_username():
-    '''
+    """
     Return the user name of the currently logged in user as a unicode string.
     Note that usernames on windows are case insensitive, the case of the value
     returned depends on what the user typed into the login box at login time.
-    '''
+    """
     import ctypes
+
     try:
         advapi32 = ctypes.windll.advapi32
-        GetUserName = getattr(advapi32, 'GetUserNameW')
+        GetUserName = getattr(advapi32, "GetUserNameW")
     except AttributeError:
         pass
     else:
@@ -96,27 +104,31 @@ def get_windows_username():
         if GetUserName(buf, ctypes.byref(n)):
             return buf.value
 
-    return os.environ.get('USERNAME')
+    return os.environ.get("USERNAME")
 
 
 def local_socket_address():
-    if getattr(local_socket_address, 'ADDRESS', None) is None:
+    if getattr(local_socket_address, "ADDRESS", None) is None:
         if iswindows:
-            local_socket_address.ADDRESS = r'\\.\pipe\vise-local-server'
+            local_socket_address.ADDRESS = r"\\.\pipe\vise-local-server"
             try:
                 user = get_windows_username()
             except Exception:
                 user = None
             if user:
-                user = user.replace(' ', '_')
+                user = user.replace(" ", "_")
                 if user:
-                    local_socket_address.ADDRESS += '-' + user[:100] + 'x'
+                    local_socket_address.ADDRESS += "-" + user[:100] + "x"
         else:
-            user = os.environ.get('USER', '')
+            user = os.environ.get("USER", "")
             if not user:
-                user = os.path.basename(os.path.expanduser('~'))
+                user = os.path.basename(os.path.expanduser("~"))
             rdir = QStandardPaths.writableLocation(
-                QStandardPaths.StandardLocation.RuntimeLocation) or QStandardPaths.writableLocation(
-                    QStandardPaths.StandardLocation.TempLocation)
-            local_socket_address.ADDRESS = os.path.join(rdir, user + '-vise-local-server')
+                QStandardPaths.StandardLocation.RuntimeLocation
+            ) or QStandardPaths.writableLocation(
+                QStandardPaths.StandardLocation.TempLocation
+            )
+            local_socket_address.ADDRESS = os.path.join(
+                rdir, user + "-vise-local-server"
+            )
     return local_socket_address.ADDRESS

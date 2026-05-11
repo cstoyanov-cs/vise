@@ -18,45 +18,41 @@ normal mode keys:  # The keys used in normal mode
     prev_tab:
         - Alt+Up
         - Shift+Up
-    close_tab: D
-    close_other_tabs: Shift+D
-    undo_close_tab: U
+    close_tab: 'd'
+    close_other_tabs: 'D'
+    undo_close_tab: 'u'
     ask:
         - ';'
         - ':'
-        - 'Shift+:'
-        - 'Shift+;'
-    ask_open: O
-    ask_tabopen: Shift+O
+    ask_open: 'o'
+    ask_tabopen: 'O'
     search_forward: /
-    search_back:
-        - '?'
-        - 'Shift+?'
-    next_match: N
-    prev_match: Shift+N
+    search_back: '?'
+    next_match: 'n'
+    prev_match: 'N'
     set_passthrough_mode: Ctrl+J
-    quickmark: G
-    quickmark_newtab: Shift+G
-    scroll_line_down: J
-    scroll_line_up: K
-    scroll_line_left: H
-    scroll_line_right: L
+    quickmark: 'g'
+    quickmark_newtab: 'G'
+    scroll_line_down: 'j'
+    scroll_line_up: 'k'
+    scroll_line_left: 'h'
+    scroll_line_right: 'l'
     scroll_page_down: Space
     scroll_page_up: BackSpace
     scroll_to_top: Home
     scroll_to_bottom: End
-    toggle_muted: M
-    copy_url: Y
-    open_modified_url: Shift+Y
+    toggle_muted: 'm'
+    copy_url: 'y'
+    open_modified_url: 'Y'
     tabopen_modified_url: Alt+Y
-    paste_and_go: P
-    paste_and_go_newtab: Shift+P
-    reload: R
-    hard_reload: Shift+R
+    paste_and_go: 'p'
+    paste_and_go_newtab: 'P'
+    reload: 'r'
+    hard_reload: 'R'
     restart: Ctrl+R
-    choose_tab: T
-    follow_link: F
-    follow_link_newtab: Shift+F
+    choose_tab: 't'
+    follow_link: 'f'
+    follow_link_newtab: 'F'
     copy_link: Alt+F
     follow_next: ']'
     follow_previous: '['
@@ -65,8 +61,7 @@ normal mode keys:  # The keys used in normal mode
     reset_zoom: '='
     increase_zoom:
         - '+'
-        - 'Shift++'
-        - 'Shift+='
+        - '='
     decrease_zoom: '-'
     quit: Ctrl+Q
 
@@ -76,7 +71,7 @@ insert mode keys:  # The keys used in insert mode (i.e. when the cursor is in a 
     edit_text: Ctrl+I
     fill_login_form: Ctrl+L
     paste_url: Ctrl+U
-    paste_selection: Ctrl+Shift+S
+    paste_selection: Ctrl+S
 
 ##################### Fonts ############################
 

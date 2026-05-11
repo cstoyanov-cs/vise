@@ -24,8 +24,12 @@ all_keys = {
     and k not in {"Key_Alt", "Key_Meta", "Key_Control", "Key_Shift"}
 }
 
+SHIFT_BIT = Qt.KeyboardModifier.ShiftModifier.value  # 0x02000000, pas 0x20000000
+
 
 def only_modifiers(key):
+    if isinstance(key, str):
+        return False  # un caractère imprimable n'est jamais "que des modifiers"
     return (key & ~modifiers_mask) not in all_keys
 
 
@@ -41,24 +45,37 @@ def key_to_string(key):
 normal_key_map, input_key_map = {}, {}
 
 
-def parse_shortcut(s):
-    if len(s) == 1 and s.isprintable():
-        return ord(s.upper())
-    return QKeySequence.fromString(s)[0].toCombined()
-
-
 def keyevent_to_code(ev):
     text = ev.text()
     modifiers = int(ev.modifiers().value) & modifiers_mask
+    SHIFT_BIT = Qt.KeyboardModifier.ShiftModifier.value
+
     if text and text.isprintable():
-        return ord(text.upper())
-    return ev.key() | modifiers
+        return text
+    return ev.key() | (modifiers & ~SHIFT_BIT)
+
+
+def parse_shortcut(s):
+    if len(s) == 1 and s.isprintable():
+        return s
+
+    # Touches spéciales : "Alt+Right", "Ctrl+Q", "Escape"...
+    seq = QKeySequence.fromString(s)
+    if seq.isEmpty():
+        return None
+    key = seq[0].toCombined()
+    SHIFT_BIT = Qt.KeyboardModifier.ShiftModifier.value
+    # Strip Shift pour les symboles genre "Shift++" → "+"
+    bare = key & ~SHIFT_BIT
+    is_symbol = bool(key & SHIFT_BIT) and bare <= 0xFF and not (65 <= bare <= 90)
+    if is_symbol:
+        key = bare
+    return key
 
 
 def read_key_map(mode="normal"):
     km = mode + " mode keys"
     dkm, ukm = load_config(user=False)[km], load_config(user=True).get(km) or {}
-
     def get_keys(x):
         if isinstance(x, str):
             x = [x]
