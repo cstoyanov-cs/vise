@@ -52,7 +52,7 @@ class Delegate(QStyledItemDelegate):
 
     def __init__(self, parent=None):
         QStyledItemDelegate.__init__(self, parent)
-        self._m = QStringListModel(['sdfgkjsg sopgjs gsgs slgjslg sdklgsgl', ''])
+        self._m = QStringListModel()
 
     def sizeHint(self, option, index):
         ans = QStyledItemDelegate.sizeHint(self, option, self._m.index(0))
