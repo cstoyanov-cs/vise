@@ -9,6 +9,8 @@ import time
 import unicodedata
 from collections import OrderedDict, namedtuple
 from itertools import repeat
+from unittest import result
+from webbrowser import get
 
 import apsw
 from PyQt6.QtWebEngineCore import QWebEnginePage
@@ -17,6 +19,7 @@ from .constants import config_dir
 from .resources import get_data
 from .db_worker import db_worker
 
+_favicon_url_cache = {}
 
 def now():
     return int(time.time() * 1e6)
@@ -354,16 +357,17 @@ class Places:
             yield place_id, url, title
 
     def favicon_url(self, place_id):
-        try:
-            return next(
-                self.conn.cursor().execute(
-                    "SELECT url FROM favicons WHERE id IN (SELECT favicon_id FROM favicons_link WHERE place_id=? LIMIT 1) LIMIT 1",
-                    (place_id,),
-                )
-            )[0]
-        except StopIteration:
-            pass
-
+        """Return the favicon URL for a place_id, using cache if available."""
+        if place_id in _favicon_url_cache:
+            return _favicon_url_cache[place_id]
+        cursor = self.conn.cursor().execute(
+            "SELECT url FROM favicons WHERE id IN (SELECT favicon_id FROM favicons_link WHERE place_id=? LIMIT 1) LIMIT 1",
+            (place_id,),
+        )
+        row = next(cursor, None)
+        if row:
+            _favicon_url_cache[place_id] = row[0]
+            return row[0]
 
 places = Places()
 

@@ -3,3 +3,11 @@ tags
 .build-cache
 resources/vise-client.js
 __pycache__
+
+# DEBUG PART
+.coveragerc
+vise/dap.lua
+
+# TESTS PART
+pytest.ini
+MagicMock

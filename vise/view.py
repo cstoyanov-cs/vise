@@ -415,7 +415,8 @@ class WebView(QWebEngineView):
     def on_icon_changed(self, icon):
         icurl = self.iconUrl()
         if not icon.isNull():
-            QApplication.instance().save_favicon_in_cache(icon, icurl)
+            app = QApplication.instance()
+            app.save_favicon_in_cache(icon, icurl)
         places.on_favicon_change(self.url(), icurl)
         self.icon_changed.emit(icon)
 

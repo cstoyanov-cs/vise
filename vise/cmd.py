@@ -11,7 +11,7 @@ from gettext import gettext as _
 from .commands import Command
 import vise.commands.open as open_commands
 import vise.commands.tab as tab_commands
-
+import vise.commands.cache as cache_commands 
 
 class Close(Command):
 
@@ -121,7 +121,7 @@ def init_commands():
             if type(val) is type and issubclass(val, Command) and val is not Command:
                 all_commands.add(val)
 
-    for group in (open_commands, tab_commands):
+    for group in (open_commands, tab_commands, cache_commands):
         process_dict(vars(group))
     process_dict(globals())
     return {c() for c in all_commands}

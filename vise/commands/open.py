@@ -52,8 +52,10 @@ class CompletionCandidate:
         if self._icon is None:
             self._icon = QIcon()
             url = places.favicon_url(self.place_id)
+            print(f"DEBUG icon(): place_id={self.place_id}, url={url}")
             if url is not None:
                 f = QApplication.instance().disk_cache.data(QUrl(url))
+                print(f"DEBUG disk_cache.data({url}) = {f}")
                 if f is not None:
                     with closing(f):
                         raw = f.readAll()
@@ -90,8 +92,14 @@ class Open(Command):
     names = {'open', 'tabopen', 'topen', 'wopen', 'winopen', 'popen', 'privateopen', 'copyurl'}
 
     def completions(self, cmd, prefix):
+        if not prefix:
+            return []
         substrings = prefix.split(' ')
-        items = [CompletionCandidate(place_id, url, title, substrings) for place_id, url, title in places.substring_matches(substrings)]
+        results = list(places.substring_matches(substrings))
+        assert all(len(r) == 3 for r in results), "Expected 3-element tuples"
+        for place_id, url, title in results:
+            places.favicon_url(place_id)
+        items = [CompletionCandidate(place_id, url, title, substrings) for place_id, url, title in results]
         return items
 
     def __call__(self, cmd, rest, window):

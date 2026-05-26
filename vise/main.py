@@ -287,7 +287,6 @@ class Application(QApplication):
                 while len(ic) > 0:
                     written = dio.write(ic)
                     if written < 0:
-                        print('Failed to save favicon with error:', dio.errorString())
                         return  # error occurred
                     ic = ic[written:]
                 self.disk_cache.insert(dio)
