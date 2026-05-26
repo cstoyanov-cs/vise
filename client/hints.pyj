@@ -229,6 +229,7 @@ def onload():
         padding: 1px !important;
         border: solid 1px currentColor !important;
         position: absolute !important;
+        z-index: 9999999 !important;
     }
 
     [ATTRN='']:before {
