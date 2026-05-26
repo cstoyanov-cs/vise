@@ -289,7 +289,7 @@ class Places:
             try:
                 place_id = next(c.execute("SELECT id FROM places WHERE url=?", (url,)))[0]
             except StopIteration:
-                returnplaces
+                return places
             if not favicon:
                 c.execute("DELETE FROM favicons_link WHERE place_id=?", (place_id,))
                 return
