@@ -60,6 +60,11 @@ class Places:
             uv = next(c.execute("PRAGMA user_version"))[0]
             if uv == 0:
                 c.execute(get_data("places.sqlite").decode("utf-8"))
+            # Migration: add data column to favicons if it doesn't exist
+            try:
+                next(c.execute("SELECT data FROM favicons WHERE id=1"))
+            except (apsw.SQLError, StopIteration):
+                c.execute("ALTER TABLE favicons ADD COLUMN data BLOB")
             c.close()
         return self._conn
 
@@ -284,7 +289,7 @@ class Places:
             try:
                 place_id = next(c.execute("SELECT id FROM places WHERE url=?", (url,)))[0]
             except StopIteration:
-                return
+                returnplaces
             if not favicon:
                 c.execute("DELETE FROM favicons_link WHERE place_id=?", (place_id,))
                 return
@@ -299,6 +304,20 @@ class Places:
                 c.execute('INSERT INTO favicons (url, last_visit_date) VALUES (?, ?)', tuple(kw.values()))
                 favicon_id = conn.last_insert_rowid()
             c.execute("INSERT OR REPLACE INTO favicons_link (favicon_id, place_id) VALUES (?, ?)", (favicon_id, place_id))
+
+    def save_favicon_data(self, url, data):
+        """Save favicon data to the database"""
+        c = self.conn.cursor()
+        c.execute("INSERT OR REPLACE INTO favicons (url, data, last_visit_date) VALUES (?, ?, ?)",
+                (url, data, now()))
+
+    def get_favicon_data(self, url):
+        """Get favicon data from the database"""
+        c = self.conn.cursor()
+        try:
+            return next(c.execute("SELECT data FROM favicons WHERE url=?", (url,)))[0]
+        except StopIteration:
+            return None
 
     def prune(self, days=400):
         limit = now() - (days * DAY)

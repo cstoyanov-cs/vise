@@ -52,13 +52,9 @@ class CompletionCandidate:
         if self._icon is None:
             self._icon = QIcon()
             url = places.favicon_url(self.place_id)
-            print(f"DEBUG icon(): place_id={self.place_id}, url={url}")
             if url is not None:
-                f = QApplication.instance().disk_cache.data(QUrl(url))
-                print(f"DEBUG disk_cache.data({url}) = {f}")
-                if f is not None:
-                    with closing(f):
-                        raw = f.readAll()
+                raw = places.get_favicon_data(url)
+                if raw is not None:
                     p = QPixmap()
                     p.loadFromData(raw)
                     if not p.isNull():

@@ -30,6 +30,7 @@ CREATE TABLE favicons(
 	id INTEGER PRIMARY KEY,
 	url TEXT NOT NULL,
 	last_visit_date INTEGER DEFAULT 0 NOT NULL,
+  data BLOB,
 	UNIQUE(url)
 );
 CREATE INDEX favicons_last_visit_date ON favicons (last_visit_date);
