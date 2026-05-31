@@ -10,8 +10,9 @@ from yaml import safe_load
 from .constants import config_dir, hostname
 from .resources import get_data_as_file
 
+DEFAULT_CACHE_SIZE = 32
 
-@lru_cache()
+@lru_cache(maxsize=DEFAULT_CACHE_SIZE)
 def load_config(user=False):
     if user:
         p = os.path.join(config_dir, "config.yaml")
@@ -23,7 +24,7 @@ def load_config(user=False):
     return safe_load(get_data_as_file("config.yaml"))
 
 
-@lru_cache()
+@lru_cache(maxsize=DEFAULT_CACHE_SIZE)
 def font_families():
     uff = (load_config(user=True).get("fonts") or {}).get("families") or {}
     dff = load_config(user=False)["fonts"]["families"]
@@ -48,7 +49,7 @@ def font_families():
     return families
 
 
-@lru_cache()
+@lru_cache(maxsize=DEFAULT_CACHE_SIZE)
 def font_sizes():
     uff = (load_config(user=True).get("fonts") or {}).get("sizes") or {}
     dff = load_config(user=False)["fonts"]["sizes"]
@@ -81,7 +82,7 @@ def font_sizes():
     return sizes
 
 
-@lru_cache()
+@lru_cache(maxsize=DEFAULT_CACHE_SIZE)
 def colors():
     uc = load_config(user=True).get("colors") or {}
     dc = load_config(user=False)["colors"]
@@ -97,7 +98,7 @@ def color(key, default):
     return ans
 
 
-@lru_cache()
+@lru_cache(maxsize=128)
 def misc_config(key, default=None):
     u = load_config(user=True).get(key) or load_config(user=False).get(key)
     if not u or u == "default":

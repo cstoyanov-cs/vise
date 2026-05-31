@@ -9,8 +9,6 @@ import time
 import unicodedata
 from collections import OrderedDict, namedtuple
 from itertools import repeat
-from unittest import result
-from webbrowser import get
 
 import apsw
 from PyQt6.QtWebEngineCore import QWebEnginePage
@@ -19,7 +17,6 @@ from .constants import config_dir
 from .resources import get_data
 from .db_worker import db_worker
 
-_favicon_url_cache = {}
 
 def now():
     return int(time.time() * 1e6)
@@ -54,17 +51,27 @@ class Places:
     def conn(self):
         if self._conn is None:
             self._conn = apsw.Connection(self.path)
-            self._conn.createscalarfunction("lower_case", lambda x: x.lower(), 1)
             c = self._conn.cursor()
             c.execute("PRAGMA foreign_keys = ON")
             uv = next(c.execute("PRAGMA user_version"))[0]
             if uv == 0:
                 c.execute(get_data("places.sqlite").decode("utf-8"))
-            # Migration: add data column to favicons if it doesn't exist
             try:
                 next(c.execute("SELECT data FROM favicons WHERE id=1"))
             except (apsw.SQLError, StopIteration):
                 c.execute("ALTER TABLE favicons ADD COLUMN data BLOB")
+            try:
+                c.execute("SELECT favicon_url FROM places WHERE id=1")
+            except (apsw.SQLError, StopIteration):
+                c.execute("ALTER TABLE places ADD COLUMN favicon_url TEXT")
+                c.execute("""
+                    UPDATE places SET favicon_url = (
+                        SELECT f.url FROM favicons f 
+                        JOIN favicons_link fl ON f.id = fl.favicon_id 
+                        WHERE fl.place_id = places.id
+                    )
+                """)
+                c.execute("PRAGMA user_version = 2")
             c.close()
         return self._conn
 
@@ -85,47 +92,60 @@ class Places:
             return
         db_worker.execute(self._do_visit, qurl, visit_type)
 
-    def _do_visit(self, qurl, visit_type):
+    def _do_visit(self, conn, qurl, visit_type):
         url = normalize(qurl.toString())
         timestamp = now()
-        conn = apsw.Connection(self.path)
-        conn.createscalarfunction('lower_case', lambda x: x.lower(), 1)
-        with conn:
-            c = conn.cursor()
-            try:
-                place_id, visit_count, typed = next(c.execute("SELECT id, visit_count, typed FROM places WHERE url=?", (url,)))
-                typed = bool(typed)
-            except StopIteration:
-                typed = visit_type is QWebEnginePage.NavigationType.NavigationTypeTyped
-                c.execute('INSERT INTO places (url, typed) VALUES (?, ?)', (url, int(typed)))
-                place_id = conn.last_insert_rowid()
-                visit_count = 0
-            typed = typed or visit_type is QWebEnginePage.NavigationType.NavigationTypeTyped
-            c.execute('INSERT INTO visits (place_id, visit_date, type) VALUES (?, ?, ?)', (place_id, timestamp, visit_type.value))
-            
-            # Calculate frecency
-            visit_weights = []
-            for visit_date, vtype in c.execute('SELECT visit_date, type FROM visits WHERE place_id=? ORDER BY visit_date DESC LIMIT 10', (place_id,)):
-                type_weight = VISIT_TYPE_WEIGHTS.get(vtype, 0)
-                if type_weight == 0:
-                    continue
-                days = abs(now() - visit_date) // DAY
-                bucket = 4
-                if days <= 4:
-                    bucket = 0
-                elif days <= 14:
-                    bucket = 1
-                elif days <= 31:
-                    bucket = 2
-                elif days <= 90:
-                    bucket = 3
-                visit_weights.append((type_weight / 100) * RECENCY_WEIGHTS[bucket])
-            try:
-                frecency = int(math.ceil(visit_count * sum(visit_weights) / len(visit_weights)))
-            except ZeroDivisionError:
-                frecency = 0
-            c.execute("UPDATE places SET visit_count = ?, last_visit_date = ?, typed = ?, frecency = ? WHERE id=?", (
-                visit_count + 1, timestamp, typed, frecency, place_id))
+        c = conn.cursor()
+        try:
+            place_id, visit_count, typed = next(
+                c.execute(
+                    "SELECT id, visit_count, typed FROM places WHERE url=?", (url,)
+                )
+            )
+            typed = bool(typed)
+        except StopIteration:
+            typed = visit_type is QWebEnginePage.NavigationType.NavigationTypeTyped
+            c.execute(
+                "INSERT INTO places (url, typed) VALUES (?, ?)", (url, int(typed))
+            )
+            place_id = conn.last_insert_rowid()
+            visit_count = 0
+        typed = typed or visit_type is QWebEnginePage.NavigationType.NavigationTypeTyped
+        c.execute(
+            "INSERT INTO visits (place_id, visit_date, type) VALUES (?, ?, ?)",
+            (place_id, timestamp, visit_type.value),
+        )
+
+        # Calculate frecency
+        visit_weights = []
+        for visit_date, vtype in c.execute(
+            "SELECT visit_date, type FROM visits WHERE place_id=? ORDER BY visit_date DESC LIMIT 10",
+            (place_id,),
+        ):
+            type_weight = VISIT_TYPE_WEIGHTS.get(vtype, 0)
+            if type_weight == 0:
+                continue
+            days = abs(now() - visit_date) // DAY
+            bucket = 4
+            if days <= 4:
+                bucket = 0
+            elif days <= 14:
+                bucket = 1
+            elif days <= 31:
+                bucket = 2
+            elif days <= 90:
+                bucket = 3
+            visit_weights.append((type_weight / 100) * RECENCY_WEIGHTS[bucket])
+        try:
+            frecency = int(
+                math.ceil(visit_count * sum(visit_weights) / len(visit_weights))
+            )
+        except ZeroDivisionError:
+            frecency = 0
+        c.execute(
+            "UPDATE places SET visit_count = ?, last_visit_date = ?, typed = ?, frecency = ? WHERE id=?",
+            (visit_count + 1, timestamp, typed, frecency, place_id),
+        )
 
     def merge_places(self, src_place_id, dest_place_id):
         "Merge src onto dest and delete src"
@@ -259,65 +279,64 @@ class Places:
             return
         db_worker.execute(self._do_title_change, qurl, title)
 
-    def _do_title_change(self, qurl, title):
+    def _do_title_change(self, conn, qurl, title):
         url = normalize(qurl.toString())
-        conn = apsw.Connection(self.path)
-        conn.createscalarfunction('lower_case', lambda x: x.lower(), 1)
-        with conn:
-            c = conn.cursor()
-            try:
-                place_id, old_title = next(c.execute("SELECT id,title FROM places WHERE url=?", (url,)))
-            except StopIteration:
-                return
-            if old_title == title:
-                return
-            c.execute("UPDATE places SET title=? WHERE id=?", (title, place_id))
+        c = conn.cursor()
+        try:
+            place_id, old_title = next(
+                c.execute("SELECT id,title FROM places WHERE url=?", (url,))
+            )
+        except StopIteration:
+            return
+        if old_title == title:
+            return
+        c.execute("UPDATE places SET title=? WHERE id=?", (title, place_id))
 
     def on_favicon_change(self, qurl, favicon_qurl):
         if qurl.isEmpty():
             return
         db_worker.execute(self._do_favicon_change, qurl, favicon_qurl)
 
-
-    def _do_favicon_change(self, qurl, favicon_qurl):
+    def _do_favicon_change(self, conn, qurl, favicon_qurl):
         url = qurl.toString()
         favicon = favicon_qurl.toString()
-        conn = apsw.Connection(self.path)
-        conn.createscalarfunction('lower_case', lambda x: x.lower(), 1)
-        with conn:
-            c = conn.cursor()
-            try:
-                place_id = next(c.execute("SELECT id FROM places WHERE url=?", (url,)))[0]
-            except StopIteration:
-                return places
-            if not favicon:
-                c.execute("DELETE FROM favicons_link WHERE place_id=?", (place_id,))
-                return
-            ts = now()
-            try:
-                favicon_id = next(c.execute("SELECT id FROM favicons WHERE url=?", (favicon,)))[0]
-                c.execute("UPDATE favicons SET last_visit_date=? WHERE id=?", (ts, favicon_id))
-            except StopIteration:
-                # Insert favicon
-                from collections import OrderedDict
-                kw = OrderedDict([('url', favicon), ('last_visit_date', ts)])
-                c.execute('INSERT INTO favicons (url, last_visit_date) VALUES (?, ?)', tuple(kw.values()))
-                favicon_id = conn.last_insert_rowid()
-            c.execute("INSERT OR REPLACE INTO favicons_link (favicon_id, place_id) VALUES (?, ?)", (favicon_id, place_id))
+        c = conn.cursor()
+        try:
+            c.execute("SELECT id FROM places WHERE url=?", (url,))
+            place_id = next(c)[0]
+        except StopIteration:
+            return
+        if favicon:
+            c.execute(
+                "UPDATE places SET favicon_url = ? WHERE id = ?",
+                (favicon, place_id),
+            )
+        else:
+            c.execute("UPDATE places SET favicon_url = NULL WHERE id = ?", (place_id,))
+
+    def _do_save_favicon_data(self, conn, url, data):
+        """Save favicon data to the database - runs in worker thread"""
+        c = conn.cursor()
+        c.execute(
+            "INSERT OR REPLACE INTO favicons (url, data, last_visit_date) VALUES (?, ?, ?)",
+            (url, data, now()),
+        )
 
     def save_favicon_data(self, url, data):
         """Save favicon data to the database"""
-        c = self.conn.cursor()
-        c.execute("INSERT OR REPLACE INTO favicons (url, data, last_visit_date) VALUES (?, ?, ?)",
-                (url, data, now()))
+        db_worker.execute(self._do_save_favicon_data, url, data)
 
     def get_favicon_data(self, url):
         """Get favicon data from the database"""
-        c = self.conn.cursor()
-        try:
-            return next(c.execute("SELECT data FROM favicons WHERE url=?", (url,)))[0]
-        except StopIteration:
-            return None
+        result = db_worker.execute_and_wait(
+            lambda conn, u: (
+                conn.cursor()
+                .execute("SELECT data FROM favicons WHERE url=?", (u,))
+                .fetchone()
+            ),
+            url,
+        )
+        return result[0] if result else None
 
     def prune(self, days=400):
         limit = now() - (days * DAY)
@@ -333,62 +352,78 @@ class Places:
             self._conn.close()
             self._conn = None
 
-    def subsequence_matches(self, subsequence=None, limit=50):
-        c = self.conn.cursor()
-        if not subsequence:
-            for url, title in c.execute(
-                "SELECT url, title FROM PLACES ORDER BY frecency DESC LIMIT ?", (limit,)
-            ):
-                yield url, title
-            return
-
-        subsequence = normalize((subsequence or ""))[:20]
-        like_expr = re.sub(r"([|%_])", r"|\1", subsequence.lower())
-        like_expr = "%" + "%".join(like_expr) + "%"
-
-        for place_id, url, title in c.execute(
-            'SELECT id, url, title FROM places WHERE url_lower LIKE ? ESCAPE "|" OR title_lower LIKE ? ESCAPE "|" ORDER BY frecency DESC LIMIT ?',
-            (like_expr, like_expr, limit),
-        ):
-            yield place_id, url, title
-
     def substring_matches(self, substrings=None, limit=50):
-        c = self.conn.cursor()
-        if not substrings:
-            for url, title in c.execute(
-                "SELECT url, title FROM PLACES ORDER BY frecency DESC LIMIT ?", (limit,)
-            ):
-                yield url, title
-            return
-        substrings = map(normalize, substrings)
-        like_expressions = tuple(
-            "%" + re.sub(r"([|%_])", r"|\1", x.lower()) + "%" for x in substrings
-        )
-        where_clause = " AND ".join(
-            repeat("(url_lower LIKE ? OR title_lower LIKE ?)", len(like_expressions))
-        )
+        s = substrings  # capture locale
 
-        for place_id, url, title in c.execute(
-            "SELECT id, url, title FROM places WHERE %s ORDER BY frecency DESC LIMIT %d"
-            % (where_clause, limit),
-            (x for x in like_expressions for _ in (0, 1)),
-        ):
+        def do_query(conn):
+            c = conn.cursor()
+            if not s:
+                return list(
+                    c.execute(
+                        "SELECT id, url, title FROM PLACES ORDER BY frecency DESC LIMIT ?",
+                        (limit,),
+                    )
+                )
+            like_expressions = tuple(
+                "%" + re.sub(r"([|%_])", r"|\1", x.lower()) + "%" for x in s
+            )
+            where_clause = " AND ".join(
+                repeat(
+                    "(url_lower LIKE ? OR title_lower LIKE ?)", len(like_expressions)
+                )
+            )
+            return list(
+                c.execute(
+                    "SELECT id, url, title FROM places WHERE %s ORDER BY frecency DESC LIMIT %d"
+                    % (where_clause, limit),
+                    (x for x in like_expressions for _ in (0, 1)),
+                )
+            )
+
+        results = db_worker.execute_and_wait(do_query)
+        for place_id, url, title in results:
             yield place_id, url, title
 
-    def favicon_url(self, place_id):
-        """Return the favicon URL for a place_id, using cache if available."""
-        if place_id in _favicon_url_cache:
-            return _favicon_url_cache[place_id]
-        cursor = self.conn.cursor().execute(
-            "SELECT url FROM favicons WHERE id IN (SELECT favicon_id FROM favicons_link WHERE place_id=? LIMIT 1) LIMIT 1",
-            (place_id,),
-        )
-        row = next(cursor, None)
-        if row:
-            _favicon_url_cache[place_id] = row[0]
-            return row[0]
+    def subsequence_matches(self, subsequence=None, limit=50):
+        s = subsequence  # capture locale
+
+        def do_query(conn):
+            c = conn.cursor()
+            if not s:
+                return list(
+                    c.execute(
+                        "SELECT id, url, title FROM PLACES ORDER BY frecency DESC LIMIT ?",
+                        (limit,),
+                    )
+                )
+            sub_normalized = normalize((s or "")[:20])
+            like_expr = re.sub(r"([|%_])", r"|\1", sub_normalized.lower())
+            like_expr = "%" + "%".join(like_expr) + "%"
+            return list(
+                c.execute(
+                    'SELECT id, url, title FROM places WHERE url_lower LIKE ? ESCAPE "|" OR title_lower LIKE ? ESCAPE "|" ORDER BY frecency DESC LIMIT ?',
+                    (like_expr, like_expr, limit),
+                )
+            )
+
+        results = db_worker.execute_and_wait(do_query)
+        for place_id, url, title in results:
+            yield place_id, url, title
+
 
 places = Places()
+
+
+def favicon_url(place_id):
+    result = db_worker.execute_and_wait(
+        lambda conn, pid: (
+            conn.cursor()
+            .execute("SELECT favicon_url FROM places WHERE id = ?", (pid,))
+            .fetchone()
+        ),
+        place_id,
+    )
+    return result[0] if result else None
 
 
 def import_from_firefox():
@@ -401,7 +436,9 @@ def import_from_firefox():
     conn = apsw.Connection(
         glob(os.path.expanduser("~/.mozilla/firefox/*/places.sqlite"))[0]
     )
-    place_id_map, favicon_id_map, favicon_links = {}, {}, {}
+    place_id_map = {}
+    favicon_id_to_url = {}
+    place_to_favicon_id = {}
     with places.conn:
         print("Importing places table")
         for (
@@ -427,7 +464,7 @@ def import_from_firefox():
                     last_visit_date=last_visit_date,
                 )
                 if favicon_id is not None and favicon_id > 0:
-                    favicon_links[place_id_map[place_id]] = favicon_id
+                    place_to_favicon_id[place_id] = favicon_id
         print("Importing visits table")
         items = []
         for place_id, visit_date, visit_type in conn.cursor().execute(
@@ -450,18 +487,21 @@ def import_from_firefox():
         )
         print("Importing favicons table")
         ts = now()
-        for favicon_id, url in conn.cursor().execute("SELECT id,url FROM moz_favicons"):
-            favicon_id_map[favicon_id] = places.insert(
-                "favicons", url=url, last_visit_date=ts
-            )
-        links = (
-            (place_id, favicon_id_map[favicon_id])
-            for place_id, favicon_id in favicon_links.items()
-        )
-        places.conn.cursor().executemany(
-            "INSERT INTO favicons_link(place_id,favicon_id) VALUES (?,?)", links
-        )
-
+        for favicon_id, favicon_url in conn.cursor().execute(
+            "SELECT id,url FROM moz_favicons"
+        ):
+            favicon_id_to_url[favicon_id] = favicon_url
+            places.insert("favicons", url=favicon_url, last_visit_date=ts)
+        # Mettre à jour les favicon_url dans places
+        print("Linking favicons to places")
+        for old_place_id, favicon_id in place_to_favicon_id.items():
+            new_place_id = place_id_map.get(old_place_id)
+            favicon_url = favicon_id_to_url.get(favicon_id)
+            if new_place_id is not None and favicon_url:
+                places.conn.cursor().execute(
+                    "UPDATE places SET favicon_url = ? WHERE id = ?",
+                    (favicon_url, new_place_id),
+                )
     print("Vacuuming...")
     conn.cursor().execute("VACUUM")
     conn.close()

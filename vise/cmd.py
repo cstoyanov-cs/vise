@@ -11,27 +11,26 @@ from gettext import gettext as _
 from .commands import Command
 import vise.commands.open as open_commands
 import vise.commands.tab as tab_commands
-import vise.commands.cache as cache_commands 
+
 
 class Close(Command):
-
-    names = {'close', 'wclose', 'winclose'}
+    names = {"close", "wclose", "winclose"}
 
     def __call__(self, cmd, rest, window):
-        if cmd == 'close':
+        if cmd == "close":
             window.close_tab()
         else:
             window.close()
 
 
 class PasswordManager(Command):
-
-    names = {'password-manager'}
+    names = {"password-manager"}
 
     def __call__(self, cmd, rest, window):
         from PyQt6.QtWidgets import QApplication
         from .passwd.db import password_db
         from .passwd.gui import PasswordManager
+
         app = QApplication.instance()
         if app.ask_for_master_password(window):
             d = PasswordManager(password_db, parent=window)
@@ -39,43 +38,41 @@ class PasswordManager(Command):
 
 
 class ClearSearchHighlighting(Command):
-
-    names = {'nohlsearch', 'nohl'}
+    names = {"nohlsearch", "nohl"}
 
     def __call__(self, cmd, rest, window):
         from .actions import clear_search_highlighting
+
         clear_search_highlighting(window)
 
 
 class Restart(Command):
-
-    names = {'restart'}
+    names = {"restart"}
 
     def __call__(self, cmd, rest, window):
         from .actions import restart
+
         restart(window)
 
 
 class Clear(Command):
-
-    names = {'clear', 'closeall'}
+    names = {"clear", "closeall"}
 
     def __call__(self, cmd, rest, window):
         window.close_all_tabs()
 
 
 class Quit(Command):
-
-    names = {'quit'}
+    names = {"quit"}
 
     def __call__(self, cmd, rest, window):
         from .actions import quit
+
         quit(window)
 
 
 class Save(Command):
-
-    names = {'save'}
+    names = {"save"}
 
     def __call__(self, cmd, rest, window):
         if window.current_tab:
@@ -83,22 +80,21 @@ class Save(Command):
 
 
 class Export(Command):
-
-    names = {'export'}
+    names = {"export"}
 
     def __call__(self, cmd, rest, window):
         from PyQt6.QtWidgets import QApplication
+
         if not rest.strip():
-            rest = os.path.join(tempfile.gettempdir(), 'unnamed.vise-session')
-        with open(rest, 'wb') as f:
+            rest = os.path.join(tempfile.gettempdir(), "unnamed.vise-session")
+        with open(rest, "wb") as f:
             session_data = QApplication.instance().serialize_state()
             f.write(pickle.dumps(session_data, pickle.HIGHEST_PROTOCOL))
-        window.show_status_message(_('Exported session to: %s') % rest, 5, 'success')
+        window.show_status_message(_("Exported session to: %s") % rest, 5, "success")
 
 
 class Print(Command):
-
-    names = {'print'}
+    names = {"print"}
 
     def __call__(self, cmd, rest, window):
         if window.current_tab:
@@ -106,11 +102,51 @@ class Print(Command):
 
 
 class Inspect(Command):
-
-    names = {'inspect', 'dev'}
+    names = {"inspect", "dev"}
 
     def __call__(self, cmd, rest, window):
         window.toggle_devtools()
+
+
+class Vacuum(Command):
+    names = {"vacuum"}
+
+    def completions(self, cmd, prefix):
+        return ()
+
+    def __call__(self, cmd, rest, window):
+        from .db_worker import db_worker
+        from .settings import gprefs
+        from .passwd.db import password_exclusions
+
+        def do_vacuum(conn):
+            conn.cursor().execute("VACUUM")
+
+        db_worker.execute(do_vacuum)
+        gprefs.conn.cursor().execute("VACUUM")
+        password_exclusions.conn.cursor().execute("VACUUM")
+        window.show_status_message(_("Database VACUUM completed"), 5, "success")
+
+
+class ClearHistory(Command):
+    names = {"clearhistory"}
+
+    def completions(self, cmd, prefix):
+        return ()
+
+    def __call__(self, cmd, rest, window):
+        from .db_worker import db_worker
+
+        def do_clear_and_vacuum(conn):
+            c = conn.cursor()
+            c.execute("DELETE FROM favicons_link")
+            c.execute("DELETE FROM favicons")
+            c.execute("DELETE FROM visits")
+            c.execute("DELETE FROM places")
+            c.execute("VACUUM")
+
+        db_worker.execute_and_wait(do_clear_and_vacuum)
+        window.show_status_message(_("History cleared and vacuumed"), 5, "success")
 
 
 def init_commands():
@@ -121,7 +157,7 @@ def init_commands():
             if type(val) is type and issubclass(val, Command) and val is not Command:
                 all_commands.add(val)
 
-    for group in (open_commands, tab_commands, cache_commands):
+    for group in (open_commands, tab_commands):
         process_dict(vars(group))
     process_dict(globals())
     return {c() for c in all_commands}
@@ -134,7 +170,7 @@ def read_command_names():
         all_command_names |= cmd.names
         for name in cmd.names:
             if name in command_map:
-                raise ValueError('The command name %r is used twice' % name)
+                raise ValueError("The command name %r is used twice" % name)
             command_map[name] = cmd
     return all_command_names, command_map
 
@@ -144,13 +180,13 @@ all_command_names, command_map = read_command_names()
 
 
 def run_command(window, text):
-    cmd, rest = text.partition(' ')[::2]
+    cmd, rest = text.partition(" ")[::2]
     obj = command_map.get(cmd)
     if obj is None:
         common = [name for name in command_map if name.startswith(cmd)]
         if len(common) == 1:
             obj = command_map[common[0]]
         else:
-            window.show_status_message(_('Unknown command: ') + cmd, 5, 'error')
+            window.show_status_message(_("Unknown command: ") + cmd, 5, "error")
             return
     obj(cmd, rest, window)

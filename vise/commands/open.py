@@ -2,13 +2,12 @@
 # vim:fileencoding=utf-8
 # License: GPL v3 Copyright: 2015, Kovid Goyal <kovid at kovidgoyal.net>
 
-from contextlib import closing
 
 from PyQt6.QtCore import QPoint, QUrl, QUrlQuery
 from PyQt6.QtGui import QIcon, QPixmap
 from PyQt6.QtWidgets import QApplication, QStyleOptionViewItem, QStyle
 
-from ..places import places
+from ..places import places, favicon_url
 from ..utils import make_highlighted_text, parse_url
 from . import Command
 
@@ -51,7 +50,7 @@ class CompletionCandidate:
     def icon(self):
         if self._icon is None:
             self._icon = QIcon()
-            url = places.favicon_url(self.place_id)
+            url = favicon_url(self.place_id)
             if url is not None:
                 raw = places.get_favicon_data(url)
                 if raw is not None:
@@ -93,8 +92,8 @@ class Open(Command):
         substrings = prefix.split(' ')
         results = list(places.substring_matches(substrings))
         assert all(len(r) == 3 for r in results), "Expected 3-element tuples"
-        for place_id, url, title in results:
-            places.favicon_url(place_id)
+        for place_id, *_ in results:
+            favicon_url(place_id)
         items = [CompletionCandidate(place_id, url, title, substrings) for place_id, url, title in results]
         return items
 

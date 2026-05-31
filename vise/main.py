@@ -19,9 +19,7 @@ from gettext import gettext as _
 from PyQt6 import sip
 from PyQt6.QtCore import Qt, QTextStream, QTimer, pyqtSignal, QSocketNotifier, QStringConverter
 from PyQt6.QtGui import QFontDatabase, QPalette, QColor
-from PyQt6.QtNetwork import (QAbstractSocket, QLocalServer, QLocalSocket,
-                             QNetworkCacheMetaData, QNetworkDiskCache,
-                             QSslSocket)
+from PyQt6.QtNetwork import (QAbstractSocket, QLocalServer, QLocalSocket, QSslSocket)
 from PyQt6.QtWebEngineCore import QWebEngineUrlScheme
 from PyQt6.QtWidgets import QApplication, QDialogButtonBox, QDialog
 
@@ -35,7 +33,7 @@ from .passwd.db import key_from_url, password_db
 from .places import places
 from .settings import delete_profile
 from .style import Style
-from .utils import BusyCursor, icon_to_data, parse_url, pipe2
+from .utils import BusyCursor, parse_url, pipe2
 from .welcome import WELCOME_URL
 from .window import MainWindow
 
@@ -63,13 +61,6 @@ def option_parser():
     parser.add_argument('--name', default=appname, help=_('Set WM_CLASS_NAME on X11'))
     parser.add_argument('urls', metavar='URL', nargs='*', help='urls to open')
     return parser
-
-
-def create_favicon_cache():
-    c = QNetworkDiskCache()
-    c.setCacheDirectory(os.path.join(cache_dir, 'favicons'))
-    c.setMaximumCacheSize(25 * 1024 * 1024)
-    return c
 
 
 dark_link_color = QColor('#6cb4ee')
@@ -100,6 +91,13 @@ def dark_palette():
 
     return p
 
+def cleanup_sessions():
+    """Remove old session files, keeping only the 3 most recent."""
+    import glob
+    sessions = glob.glob(os.path.join(cache_dir, 'last-session*.pickle'))
+    sessions.sort(key=lambda x: os.path.getmtime(x), reverse=True)
+    for old_session in sessions[3:]:
+        os.remove(old_session)
 
 class Application(QApplication):
 
@@ -153,7 +151,6 @@ class Application(QApplication):
                 f.setFamily('Ubuntu')
             self.setFont(f)
         self.downloads = Downloads(self)
-        self.disk_cache = create_favicon_cache()
         self.key_filter = KeyFilter(self)
         self.installEventFilter(self.key_filter)
 
@@ -276,23 +273,9 @@ class Application(QApplication):
         if urls:
             self.open_urls(urls, in_current_tab='dynamic', switch_to_tab=True)
 
-    def save_favicon_in_cache(self, icon, qurl):
-        md = QNetworkCacheMetaData()
-        md.setUrl(qurl)
-        md.setSaveToDisk(True)
-        dio = self.disk_cache.prepare(md)
-        if dio:
-            ic = icon_to_data(icon, w=None)
-            if ic:
-                while len(ic) > 0:
-                    written = dio.write(ic)
-                    if written < 0:
-                        return  # error occurred
-                    ic = ic[written:]
-                self.disk_cache.insert(dio)
-
     def shutdown(self):
         self.lastWindowClosed.disconnect()
+        cleanup_sessions()
         if not self.no_session:
             state = self.serialize_state()
             state = pickle.dumps(state, pickle.HIGHEST_PROTOCOL)

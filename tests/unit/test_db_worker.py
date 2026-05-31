@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 
 
 class TestDBWorker:
-    def test_dbworker_initialization(self):
+    def test_dbwriteworker_initialization(self):
         from vise.db_worker import DBWorker
         worker = DBWorker()
         assert worker._queue is not None
@@ -45,6 +45,6 @@ class TestDBWorker:
 
 class TestDBWorkerSingleton:
     def test_db_worker_is_singleton(self):
-        from vise.db_worker import db_worker
+        from vise.db_worker import db_write_worker
         assert db_worker is not None
-        assert isinstance(db_worker, type(db_worker))
+        assert isinstance(db_worker, type(db_write_worker))

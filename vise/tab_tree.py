@@ -4,7 +4,6 @@
 
 import string
 import weakref
-from contextlib import closing
 from functools import partial
 from gettext import gettext as _
 
@@ -165,18 +164,6 @@ class TabItem(QTreeWidgetItem):
         if url != self.url_when_current_icon_was_set:
             self.icon_changed(QIcon())
 
-    def icon_url_changed(self, url):
-        dc = QApplication.instance().disk_cache.data(url)
-        if dc is not None:
-            with closing(dc):
-                raw = dc.readAll()
-                p = QPixmap()
-                p.loadFromData(raw)
-                if not p.isNull():
-                    ic = QIcon()
-                    ic.addPixmap(p)
-                    self.set_data(DECORATION_ROLE, ic)
-
     def _loading_status_changed(self, loading):
         self.set_data(LOADING_ROLE, 0 if loading else 1)
         self.loading_status_changed(self, loading)
@@ -319,7 +306,7 @@ class TabTree(QTreeWidget):
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.customContextMenuRequested.connect(self.show_context_menu)
 
-    def item_entered(self, item, col):
+    def item_entered(self, item, _col):
         try:
             item.set_data(HOVER_ROLE, True)
         except AttributeError:
@@ -503,11 +490,11 @@ class TabTree(QTreeWidget):
             ans += self.count_children(item.child(i))
         return ans
 
-    def item_clicked(self, item, column):
+    def item_clicked(self, item, _column):
         if (tab := getattr(item, 'tab', None)) is not None:
             self.tab_activated.emit(tab)
 
-    def _activate_item(self, item, tab, expand=True):
+    def _activate_item(self, item, _tab, expand=True):
         self.scrollToItem(item)
         self.tab_activated.emit(item.tab)
         if expand and not item.isExpanded():
