@@ -9,6 +9,8 @@ from gettext import gettext as _
 
 
 from .commands import Command
+from .places import places
+from .database import Database
 import vise.commands.open as open_commands
 import vise.commands.tab as tab_commands
 
@@ -115,16 +117,15 @@ class Vacuum(Command):
         return ()
 
     def __call__(self, cmd, rest, window):
-        from .db_worker import db_worker
         from .settings import gprefs
         from .passwd.db import password_exclusions
 
         def do_vacuum(conn):
             conn.cursor().execute("VACUUM")
 
-        db_worker.execute(do_vacuum)
-        gprefs.conn.cursor().execute("VACUUM")
-        password_exclusions.conn.cursor().execute("VACUUM")
+        Database.get(places.path).execute_and_wait(do_vacuum)
+        Database.get(gprefs.path).execute_and_wait(lambda c: c.execute("VACUUM"))
+        Database.get(password_exclusions.path).execute_and_wait(lambda c: c.execute("VACUUM"))
         window.show_status_message(_("Database VACUUM completed"), 5, "success")
 
 
@@ -135,7 +136,6 @@ class ClearHistory(Command):
         return ()
 
     def __call__(self, cmd, rest, window):
-        from .db_worker import db_worker
 
         def do_clear_and_vacuum(conn):
             c = conn.cursor()
@@ -145,7 +145,7 @@ class ClearHistory(Command):
             c.execute("DELETE FROM places")
             c.execute("VACUUM")
 
-        db_worker.execute_and_wait(do_clear_and_vacuum)
+        Database.get(places.path).execute_and_wait(do_clear_and_vacuum)
         window.show_status_message(_("History cleared and vacuumed"), 5, "success")
 
 

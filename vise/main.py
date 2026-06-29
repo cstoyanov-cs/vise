@@ -440,7 +440,7 @@ def run_app(
     finally:
         app.break_cycles()
         delete_profile()
-        places.close()
+        places.prune()
         app.sendPostedEvents()
         restart_state = getattr(app, 'restart_state', None)
         sip.delete(app)
