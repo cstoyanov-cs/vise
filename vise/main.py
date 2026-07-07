@@ -156,7 +156,7 @@ FAVICON_DIR = os.path.join(cache_dir, "favicons")  # dossier racine des favicons
 
 
 def favicon_path(url):
-    h = hashlib.md5(url.encode("utf-8")).hexdigest()
+    h = hashlib.sha256(url.encode("utf-8")).hexdigest()
     subdir = os.path.join(FAVICON_DIR, h[:2])
     os.makedirs(subdir, exist_ok=True)
     return os.path.join(subdir, h[2:])
