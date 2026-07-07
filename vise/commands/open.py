@@ -10,7 +10,7 @@ from PyQt6.QtWidgets import QApplication, QStyleOptionViewItem, QStyle
 from ..places import places, favicon_url
 from ..utils import make_highlighted_text, parse_url
 from . import Command
-
+from contextlib import closing
 
 def search_engine(q):
     ans = QUrl('https://duckduckgo.com')
@@ -52,8 +52,10 @@ class CompletionCandidate:
             self._icon = QIcon()
             url = favicon_url(self.place_id)
             if url is not None:
-                raw = places.get_favicon_data(url)
-                if raw is not None:
+                f = QApplication.instance().disk_cache.data(QUrl(url))
+                if f is not None:
+                    with closing(f):
+                        raw = bytes(f.readAll())
                     p = QPixmap()
                     p.loadFromData(raw)
                     if not p.isNull():

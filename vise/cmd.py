@@ -139,8 +139,6 @@ class ClearHistory(Command):
 
         def do_clear_and_vacuum(conn):
             c = conn.cursor()
-            c.execute("DELETE FROM favicons_link")
-            c.execute("DELETE FROM favicons")
             c.execute("DELETE FROM visits")
             c.execute("DELETE FROM places")
             c.execute("VACUUM")

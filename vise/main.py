@@ -17,15 +17,35 @@ from datetime import datetime
 from gettext import gettext as _
 
 from PyQt6 import sip
-from PyQt6.QtCore import Qt, QTextStream, QTimer, pyqtSignal, QSocketNotifier, QStringConverter
+from PyQt6.QtCore import (
+    Qt,
+    QTextStream,
+    QTimer,
+    pyqtSignal,
+    QSocketNotifier,
+    QStringConverter,
+)
 from PyQt6.QtGui import QFontDatabase, QPalette, QColor
-from PyQt6.QtNetwork import (QAbstractSocket, QLocalServer, QLocalSocket, QSslSocket)
+from PyQt6.QtNetwork import (
+    QAbstractSocket,
+    QLocalServer,
+    QLocalSocket,
+    QNetworkCacheMetaData,
+    QNetworkDiskCache,
+    QSslSocket,
+)
 from PyQt6.QtWebEngineCore import QWebEngineUrlScheme
 from PyQt6.QtWidgets import QApplication, QDialogButtonBox, QDialog
 
-from .constants import (VISE_SCHEME, appname, cache_dir, config_dir,
-                        iswindows, local_socket_address,
-                        str_version)
+from .constants import (
+    VISE_SCHEME,
+    appname,
+    cache_dir,
+    config_dir,
+    iswindows,
+    local_socket_address,
+    str_version,
+)
 from .downloads import Downloads
 from .keys import KeyFilter
 from .message_box import error_dialog
@@ -33,7 +53,7 @@ from .passwd.db import key_from_url, password_db
 from .places import places
 from .settings import delete_profile
 from .style import Style
-from .utils import BusyCursor, parse_url, pipe2
+from .utils import BusyCursor, icon_to_data, parse_url, pipe2
 from .welcome import WELCOME_URL
 from .window import MainWindow
 
@@ -41,31 +61,65 @@ ADDRESS = None
 
 
 def option_parser():
-    parser = argparse.ArgumentParser(description='Run the {} browser'.format(appname))
-    parser.add_argument('--shell', action='store_true', default=False, help=_(
-        'Start an interactive shell'))
-    parser.add_argument('-c', '--cmd', default=None, help=_(
-        'Run python code in the vise context'))
-    parser.add_argument('--pw-from-stdin', action='store_true', default=False, help=_(
-        'Read the master password for the password manager from stdin'))
-    parser.add_argument('--new-instance', action='store_true', default=False, help=_(
-        'Do not try to connect to an already running instance'))
-    parser.add_argument('--shutdown', action='store_true', default=False, help=_(
-        'Shutdown a running vise instance, if any'))
-    parser.add_argument('--no-session', action='store_true', default=False, help=_(
-        'Do not save/restore the session at shutdown/startup'))
-    parser.add_argument('--startup-session', default=None, help=_(
-        'Path to a session previously saved with the export command. It will'
-        ' be used to startup this instance of vise. Note that if vise is already'
-        ' running this will have no effect'))
-    parser.add_argument('--name', default=appname, help=_('Set WM_CLASS_NAME on X11'))
-    parser.add_argument('urls', metavar='URL', nargs='*', help='urls to open')
+    parser = argparse.ArgumentParser(description="Run the {} browser".format(appname))
+    parser.add_argument(
+        "--shell",
+        action="store_true",
+        default=False,
+        help=_("Start an interactive shell"),
+    )
+    parser.add_argument(
+        "-c", "--cmd", default=None, help=_("Run python code in the vise context")
+    )
+    parser.add_argument(
+        "--pw-from-stdin",
+        action="store_true",
+        default=False,
+        help=_("Read the master password for the password manager from stdin"),
+    )
+    parser.add_argument(
+        "--new-instance",
+        action="store_true",
+        default=False,
+        help=_("Do not try to connect to an already running instance"),
+    )
+    parser.add_argument(
+        "--shutdown",
+        action="store_true",
+        default=False,
+        help=_("Shutdown a running vise instance, if any"),
+    )
+    parser.add_argument(
+        "--no-session",
+        action="store_true",
+        default=False,
+        help=_("Do not save/restore the session at shutdown/startup"),
+    )
+    parser.add_argument(
+        "--startup-session",
+        default=None,
+        help=_(
+            "Path to a session previously saved with the export command. It will"
+            " be used to startup this instance of vise. Note that if vise is already"
+            " running this will have no effect"
+        ),
+    )
+    parser.add_argument("--name", default=appname, help=_("Set WM_CLASS_NAME on X11"))
+    parser.add_argument("urls", metavar="URL", nargs="*", help="urls to open")
     return parser
 
 
-dark_link_color = QColor('#6cb4ee')
+dark_link_color = QColor("#6cb4ee")
 dark_color = QColor(45, 45, 45)
-dark_text_color = QColor('#ddd')
+dark_text_color = QColor("#ddd")
+
+
+def create_favicon_cache():
+    c = QNetworkDiskCache()
+    c.setCacheDirectory(os.path.join(cache_dir, "favicons"))
+    c.setMaximumCacheSize(25 * 1024 * 1024)
+
+    return c
 
 
 def dark_palette():
@@ -81,26 +135,32 @@ def dark_palette():
     p.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.Text, disabled_color)
     p.setColor(QPalette.ColorRole.Button, dark_color)
     p.setColor(QPalette.ColorRole.ButtonText, dark_text_color)
-    p.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.ButtonText, disabled_color)
+    p.setColor(
+        QPalette.ColorGroup.Disabled, QPalette.ColorRole.ButtonText, disabled_color
+    )
     p.setColor(QPalette.ColorRole.BrightText, Qt.GlobalColor.red)
     p.setColor(QPalette.ColorRole.Link, dark_link_color)
 
-    p.setColor(QPalette.ColorRole.Highlight, QColor(0x0b, 0x45, 0xc4))
+    p.setColor(QPalette.ColorRole.Highlight, QColor(0x0B, 0x45, 0xC4))
     p.setColor(QPalette.ColorRole.HighlightedText, dark_text_color)
-    p.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.HighlightedText, disabled_color)
+    p.setColor(
+        QPalette.ColorGroup.Disabled, QPalette.ColorRole.HighlightedText, disabled_color
+    )
 
     return p
+
 
 def cleanup_sessions():
     """Remove old session files, keeping only the 3 most recent."""
     import glob
-    sessions = glob.glob(os.path.join(cache_dir, 'last-session*.pickle'))
+
+    sessions = glob.glob(os.path.join(cache_dir, "last-session*.pickle"))
     sessions.sort(key=lambda x: os.path.getmtime(x), reverse=True)
     for old_session in sessions[3:]:
         os.remove(old_session)
 
-class Application(QApplication):
 
+class Application(QApplication):
     password_loaded = pyqtSignal(object, object)
 
     @property
@@ -111,33 +171,45 @@ class Application(QApplication):
         return False
 
     def __init__(
-            self, master_password=None, urls=(), new_instance=False, shutdown=False,
-            restart_state=None, no_session=False, run_local_server=True, name=appname,
+        self,
+        master_password=None,
+        urls=(),
+        new_instance=False,
+        shutdown=False,
+        restart_state=None,
+        no_session=False,
+        run_local_server=True,
+        name=appname,
     ):
-        QApplication.__init__(self, [appname, '-name', name])
-        self.setDesktopFileName('vise')
+        QApplication.__init__(self, [appname, "-name", name])
+        self.setDesktopFileName("vise")
         if self.in_dark_mode:
             self.setPalette(dark_palette())
-        self.setOrganizationName('kovidgoyal')
+        self.setOrganizationName("kovidgoyal")
         self.setApplicationName(appname)
         self.setApplicationVersion(str_version)
         self.no_session = no_session
         self.handle_unix_signals()
         if not QSslSocket.supportsSsl():
-            raise SystemExit('Qt has been compiled without SSL support!')
+            raise SystemExit("Qt has been compiled without SSL support!")
         from .config import font_families
-        ff = font_families().get('sans-serif') or 'default'
-        if ff == 'default':
-            ff = font_families().get('default') or 'default'
+
+        ff = font_families().get("sans-serif") or "default"
+        if ff == "default":
+            ff = font_families().get("default") or "default"
         f = self.font()
-        if ff != 'default':
+        if ff != "default":
             f.setFamily(ff)
         self.setFont(f)
-        self.password_loaded.connect(self.on_password_load, type=Qt.ConnectionType.QueuedConnection)
+        self.password_loaded.connect(
+            self.on_password_load, type=Qt.ConnectionType.QueuedConnection
+        )
         if master_password is not None:
             password_db.start_load(master_password, self.password_loaded.emit)
-        elif restart_state and 'key' in restart_state:
-            password_db.start_load(restart_state.pop('key'), self.password_loaded.emit, pw_is_key=True)
+        elif restart_state and "key" in restart_state:
+            password_db.start_load(
+                restart_state.pop("key"), self.password_loaded.emit, pw_is_key=True
+            )
 
         self.lastWindowClosed.connect(self.shutdown)
         if run_local_server:
@@ -145,12 +217,16 @@ class Application(QApplication):
         sys.excepthook = self.on_unhandled_error
         self.windows = []
         f = self.font()
-        if (f.family(), f.pointSize()) == ('Sans Serif', 9):  # Hard coded Qt settings, no user preference detected
+        if (f.family(), f.pointSize()) == (
+            "Sans Serif",
+            9,
+        ):  # Hard coded Qt settings, no user preference detected
             f.setPointSize(10)
-            if 'Ubuntu' in QFontDatabase.families():
-                f.setFamily('Ubuntu')
+            if "Ubuntu" in QFontDatabase.families():
+                f.setFamily("Ubuntu")
             self.setFont(f)
         self.downloads = Downloads(self)
+        self.disk_cache = create_favicon_cache()
         self.key_filter = KeyFilter(self)
         self.installEventFilter(self.key_filter)
 
@@ -160,7 +236,10 @@ class Application(QApplication):
             self.signal_read_socket, self.signal_write_socket = socket.socketpair()
             self.signal_read_socket.setblocking(False)
             self.signal_write_socket.setblocking(False)
-            read_fd, write_fd = self.signal_read_socket.fileno(), self.signal_write_socket.fileno()
+            read_fd, write_fd = (
+                self.signal_read_socket.fileno(),
+                self.signal_write_socket.fileno(),
+            )
         else:
             read_fd, write_fd = pipe2()
         for sig in (signal.SIGINT, signal.SIGTERM):
@@ -169,21 +248,34 @@ class Application(QApplication):
         signal.set_wakeup_fd(write_fd)
         self.signal_notifier = QSocketNotifier(read_fd, QSocketNotifier.Type.Read, self)
         self.signal_notifier.setEnabled(True)
-        self.signal_notifier.activated.connect(self.signal_received, type=Qt.ConnectionType.QueuedConnection)
+        self.signal_notifier.activated.connect(
+            self.signal_received, type=Qt.ConnectionType.QueuedConnection
+        )
 
     def signal_received(self, read_fd):
         try:
-            data = self.signal_read_socket.recv(1024) if iswindows else os.read(read_fd, 1024)
+            data = (
+                self.signal_read_socket.recv(1024)
+                if iswindows
+                else os.read(read_fd, 1024)
+            )
         except BlockingIOError:
             return
         if data:
-            signals = struct.unpack('%uB' % len(data), data)
+            signals = struct.unpack("%uB" % len(data), data)
             if signal.SIGINT in signals or signal.SIGTERM in signals:
                 self.shutdown()
 
     def show_password_load_error(self, error, tb, parent=None):
-        error_dialog(parent or (self.windows[0] if self.windows else None), _('Failed to load password database'), _(
-            'There was an error processing the password database:') + '<br>' + str(error), det_msg=tb, show=True)
+        error_dialog(
+            parent or (self.windows[0] if self.windows else None),
+            _("Failed to load password database"),
+            _("There was an error processing the password database:")
+            + "<br>"
+            + str(error),
+            det_msg=tb,
+            show=True,
+        )
 
     def on_password_load(self, error, tb):
         if error:
@@ -191,11 +283,14 @@ class Application(QApplication):
 
     def ask_for_master_password(self, parent=None):
         from .passwd.gui import AskForPassword
+
         with BusyCursor():
             pw_loaded = password_db.join()
         if not pw_loaded:
             while True:
-                d = AskForPassword(parent=parent, create_password=not password_db.has_password())
+                d = AskForPassword(
+                    parent=parent, create_password=not password_db.has_password()
+                )
                 if d.exec() != QDialog.DialogCode.Accepted:
                     return
                 with BusyCursor():
@@ -203,7 +298,9 @@ class Application(QApplication):
                     password_db.join()
                 if password_db.error[0] is None:
                     break
-                self.show_password_load_error(password_db.error[0], password_db.error[1], parent=parent)
+                self.show_password_load_error(
+                    password_db.error[0], password_db.error[1], parent=parent
+                )
         return password_db.is_loaded
 
     def store_password(self, url, username, password):
@@ -222,15 +319,15 @@ class Application(QApplication):
             stream = QTextStream(s)
             stream.setEncoding(QStringConverter.Encoding.Utf8)
             if shutdown:
-                cargs = json.dumps({'action': 'shutdown'})
+                cargs = json.dumps({"action": "shutdown"})
             else:
-                cargs = json.dumps({'open': urls}, ensure_ascii=False)
+                cargs = json.dumps({"open": urls}, ensure_ascii=False)
             stream << cargs
             stream.flush()
             s.waitForBytesWritten()
             raise SystemExit(0)
         if shutdown:
-            raise SystemExit('No running vise instance found')
+            raise SystemExit("No running vise instance found")
         self.local_server = ls = QLocalServer(self)
         ls.newConnection.connect(self.another_instance_wants_to_talk)
         if not ls.listen(server_name):
@@ -240,8 +337,10 @@ class Application(QApplication):
                 except FileNotFoundError:
                     pass
             if not ls.listen(server_name):
-                raise SystemExit('Failed to establish local listening socket at: %s with error: %s' % (
-                    server_name, ls.errorString()))
+                raise SystemExit(
+                    "Failed to establish local listening socket at: %s with error: %s"
+                    % (server_name, ls.errorString())
+                )
 
     def another_instance_wants_to_talk(self):
         s = self.local_server.nextPendingConnection()
@@ -254,24 +353,26 @@ class Application(QApplication):
         try:
             command = json.loads(raw)
         except Exception as e:
-            self.error('Invalid data from other instance: %s' % e)
+            self.error("Invalid data from other instance: %s" % e)
             return
         finally:
             s.close()
             del s
         if not isinstance(command, dict):
-            self.error('Invalid data from other instance: %r' % command)
+            self.error("Invalid data from other instance: %r" % command)
             return
-        ac = command.get('action')
-        if ac == 'shutdown':
+        ac = command.get("action")
+        if ac == "shutdown":
             return self.shutdown()
-        urls = command.get('open', [])
+        urls = command.get("open", [])
         if not isinstance(urls, list):
-            self.error('Invalid data from other instance: %r' % command)
+            self.error("Invalid data from other instance: %r" % command)
             return
         urls = [x for x in urls if isinstance(x, str)]
         if urls:
-            self.open_urls(urls, in_current_tab='dynamic', switch_to_tab=True)
+            self.open_urls(urls, in_current_tab="dynamic", switch_to_tab=True)
+
+
 
     def shutdown(self):
         self.lastWindowClosed.disconnect()
@@ -282,7 +383,7 @@ class Application(QApplication):
             f = tempfile.NamedTemporaryFile(dir=cache_dir)
             try:
                 f.write(state)
-                os.replace(f.name, os.path.join(cache_dir, 'last-session.pickle'))
+                os.replace(f.name, os.path.join(cache_dir, "last-session.pickle"))
             finally:
                 try:
                     f.close()
@@ -293,7 +394,9 @@ class Application(QApplication):
 
     def new_window(self, is_private=False, restart_state=None):
         w = MainWindow(is_private=is_private, restart_state=restart_state)
-        w.window_closed.connect(self.remove_window, type=Qt.ConnectionType.QueuedConnection)
+        w.window_closed.connect(
+            self.remove_window, type=Qt.ConnectionType.QueuedConnection
+        )
         self.windows.append(w)
         return w
 
@@ -308,14 +411,20 @@ class Application(QApplication):
         if not self.windows:
             self.new_window().show()
         w = self.activeWindow() or self.windows[0]
-        if in_current_tab == 'dynamic' and hasattr(w, 'current_tab'):
-            in_current_tab = w.current_tab is not None and w.current_tab.url() == WELCOME_URL
+        if in_current_tab == "dynamic" and hasattr(w, "current_tab"):
+            in_current_tab = (
+                w.current_tab is not None and w.current_tab.url() == WELCOME_URL
+            )
         for i, url in enumerate(urls):
-            w.open_url(parse_url(url), in_current_tab=in_current_tab and i == 0, switch_to_tab=switch_to_tab and i == 0)
+            w.open_url(
+                parse_url(url),
+                in_current_tab=in_current_tab and i == 0,
+                switch_to_tab=switch_to_tab and i == 0,
+            )
 
     def error(self, *args, **kwargs):
-        kwargs['file'] = sys.stderr
-        prefix = '[%s %s]' % (appname, datetime.now().isoformat(' '))
+        kwargs["file"] = sys.stderr
+        prefix = "[%s %s]" % (appname, datetime.now().isoformat(" "))
         try:
             print(prefix, *args, **kwargs)
         except OSError:
@@ -329,11 +438,19 @@ class Application(QApplication):
             msg = str(value)
         except Exception:
             msg = repr(value)
-        msg = '<p>' + msg + '<br>' + _('Click "Show details" for more information')
-        det_msg = '%s: %s\n%s' % (appname, str_version, ''.join(traceback.format_exception(etype, value, tb)))
+        msg = "<p>" + msg + "<br>" + _('Click "Show details" for more information')
+        det_msg = "%s: %s\n%s" % (
+            appname,
+            str_version,
+            "".join(traceback.format_exception(etype, value, tb)),
+        )
         parent = self.activeWindow()
-        d = error_dialog(parent, _('Unhandled exception'), msg, det_msg=det_msg, show=False)
-        b = d.shutdown_button = d.bb.addButton(_('Shutdown'), QDialogButtonBox.ButtonRole.ActionRole)
+        d = error_dialog(
+            parent, _("Unhandled exception"), msg, det_msg=det_msg, show=False
+        )
+        b = d.shutdown_button = d.bb.addButton(
+            _("Shutdown"), QDialogButtonBox.ButtonRole.ActionRole
+        )
         b.clicked.connect(self.exit_with_error)
         d.exec()
 
@@ -347,7 +464,7 @@ class Application(QApplication):
         # Reset excepthook otherwise we get a segfault on exit, since the application object is deleted
         # before we exit
         sys.excepthook = sys.__excepthook__
-        if hasattr(self, 'local_server'):
+        if hasattr(self, "local_server"):
             self.local_server.close()
             del self.local_server
         self.downloads.break_cycles()
@@ -359,22 +476,31 @@ class Application(QApplication):
         del self.windows
 
     def serialize_state(self, include_favicons=False, include_key=False):
-        ans = {'windows': [w.serialize_state(include_favicons) for w in self.windows]}
+        ans = {"windows": [w.serialize_state(include_favicons) for w in self.windows]}
         w = self.activeWindow()
-        if getattr(w, 'window_id', None) is not None:
-            ans['active_window'] = w.window_id
-        if include_key and password_db.is_loaded and password_db.key and not password_db.key_error:
-            ans['key'] = password_db.key
+        if getattr(w, "window_id", None) is not None:
+            ans["active_window"] = w.window_id
+        if (
+            include_key
+            and password_db.is_loaded
+            and password_db.key
+            and not password_db.key_error
+        ):
+            ans["key"] = password_db.key
         return ans
 
     def unserialize_state(self, state):
-        active_window = state.get('active_window')
-        for wstate in state['windows']:
-            w = self.new_window(restart_state=wstate, is_private=wstate['is_private'])
+        active_window = state.get("active_window")
+        for wstate in state["windows"]:
+            w = self.new_window(restart_state=wstate, is_private=wstate["is_private"])
             w.show()
-            if wstate['window_id'] == active_window:
+            if wstate["window_id"] == active_window:
                 active_window = w
-        if hasattr(active_window, 'raise_') and self.activeWindow() != active_window and len(self.windows) > 1:
+        if (
+            hasattr(active_window, "raise_")
+            and self.activeWindow() != active_window
+            and len(self.windows) > 1
+        ):
             w.raise_()
 
     def restart_app(self):
@@ -385,14 +511,35 @@ class Application(QApplication):
         self.shutdown()
 
 
+def save_favicon_in_cache(icon, qurl):
+    app = QApplication.instance()
+    if app is None : 
+        return
+    ic = icon_to_data(icon, w=None)
+    if not ic:
+        return
+    md = QNetworkCacheMetaData()
+    md.setUrl(qurl)
+    md.setSaveToDisk(True)
+    dio = app.disk_cache.prepare(md)
+    if not dio:
+        return
+    while len(ic) > 0:
+        written = dio.write(ic)
+        if written < 0:
+            return
+        ic = ic[written:]
+    app.disk_cache.insert(dio)
+
 def restart(state, env):
     import shlex
     import subprocess
-    env['IS_VISE_RESTART'] = '1'
+
+    env["IS_VISE_RESTART"] = "1"
     cmd = [sys.executable, sys.argv[0]]
-    if '--new-instance' in sys.argv:
-        cmd.append('--new-instance')
-    print('Restarting with command:', *map(shlex.quote, cmd))
+    if "--new-instance" in sys.argv:
+        cmd.append("--new-instance")
+    print("Restarting with command:", *map(shlex.quote, cmd))
     p = subprocess.Popen(cmd, env=env, stdin=subprocess.PIPE)
     p.stdin.write(state), p.stdin.flush(), p.stdin.close()
 
@@ -401,7 +548,7 @@ def last_saved_session(no_session):
     if no_session:
         return
     try:
-        with open(os.path.join(cache_dir, 'last-session.pickle'), 'rb') as f:
+        with open(os.path.join(cache_dir, "last-session.pickle"), "rb") as f:
             os.unlink(f.name)
             return pickle.load(f)
     except Exception:
@@ -409,22 +556,34 @@ def last_saved_session(no_session):
 
 
 def run_app(
-        urls=(), callback=None, callback_wait=0,
-        master_password=None, new_instance=False, shutdown=False, restart_state=None,
-        no_session=False, startup_session=None, name=appname):
+    urls=(),
+    callback=None,
+    callback_wait=0,
+    master_password=None,
+    new_instance=False,
+    shutdown=False,
+    restart_state=None,
+    no_session=False,
+    startup_session=None,
+    name=appname,
+):
     env = os.environ.copy()
     app = Application(
-        master_password=master_password, urls=urls, new_instance=new_instance,
-        shutdown=shutdown, restart_state=restart_state, no_session=no_session,
-        name=name
+        master_password=master_password,
+        urls=urls,
+        new_instance=new_instance,
+        shutdown=shutdown,
+        restart_state=restart_state,
+        no_session=no_session,
+        name=name,
     )
-    os.environ['QTWEBENGINE_DICTIONARIES_PATH'] = os.path.join(config_dir, 'spell')
+    os.environ["QTWEBENGINE_DICTIONARIES_PATH"] = os.path.join(config_dir, "spell")
     original_env = env
     style = Style()
     app.setStyle(style)
     try:
         if startup_session is not None:
-            with open(startup_session, 'rb') as f:
+            with open(startup_session, "rb") as f:
                 app.unserialize_state(pickle.load(f))
         elif restart_state is not None:
             app.unserialize_state(restart_state)
@@ -442,7 +601,7 @@ def run_app(
         delete_profile()
         places.prune()
         app.sendPostedEvents()
-        restart_state = getattr(app, 'restart_state', None)
+        restart_state = getattr(app, "restart_state", None)
         sip.delete(app)
         del app
         gc.collect(), gc.collect(), gc.collect()
@@ -458,10 +617,11 @@ def main():
         raise SystemExit(0)
     elif args.shell:
         from .utils import ipython
+
         ipython()
         raise SystemExit(0)
 
-    scheme = QWebEngineUrlScheme(VISE_SCHEME.encode('ascii'))
+    scheme = QWebEngineUrlScheme(VISE_SCHEME.encode("ascii"))
     scheme.setSyntax(QWebEngineUrlScheme.Syntax.Path)
     scheme.setDefaultPort(13254)
     scheme.setFlags(QWebEngineUrlScheme.Flag.SecureScheme)
@@ -469,11 +629,16 @@ def main():
 
     pw = sys.stdin.read().rstrip() if args.pw_from_stdin else None
     restart_state = None
-    if os.environ.pop('IS_VISE_RESTART', None) == '1':
+    if os.environ.pop("IS_VISE_RESTART", None) == "1":
         restart_state = pickle.loads(sys.stdin.buffer.read())
 
-    run_app(args.urls, master_password=pw, new_instance=args.new_instance,
-            shutdown=args.shutdown, restart_state=restart_state,
-            no_session=args.no_session, startup_session=args.startup_session,
-            name=args.name
-            )
+    run_app(
+        args.urls,
+        master_password=pw,
+        new_instance=args.new_instance,
+        shutdown=args.shutdown,
+        restart_state=restart_state,
+        no_session=args.no_session,
+        startup_session=args.startup_session,
+        name=args.name,
+    )

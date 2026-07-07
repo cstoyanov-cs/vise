@@ -51,23 +51,10 @@ class Places:
         uv = next(c.execute("PRAGMA user_version"))[0]
         if uv == 0:
             c.execute(get_data("places.sqlite").decode("utf-8"))
-        col_exists = any(
-            row[1] == "data" for row in c.execute("PRAGMA table_info(favicons)")
-        )
-        if not col_exists:
-            c.execute("ALTER TABLE favicons ADD COLUMN data BLOB")
         try:
             c.execute("SELECT favicon_url FROM places WHERE id=1")
         except (apsw.SQLError, StopIteration):
             c.execute("ALTER TABLE places ADD COLUMN favicon_url TEXT")
-            c.execute("""
-                UPDATE places SET favicon_url = (
-                    SELECT f.url FROM favicons f 
-                    JOIN favicons_link fl ON f.id = fl.favicon_id 
-                    WHERE fl.place_id = places.id
-                )
-            """)
-            c.execute("PRAGMA user_version = 2")
 
     def insert(self, table, **kw):
         def do_work(conn):
@@ -326,38 +313,14 @@ class Places:
         else:
             c.execute("UPDATE places SET favicon_url = NULL WHERE id = ?", (place_id,))
 
-    def _do_save_favicon_data(self, conn, url, data):
-        """Save favicon data to the database - runs in worker thread"""
-        c = conn.cursor()
-        c.execute(
-            "INSERT OR REPLACE INTO favicons (url, data, last_visit_date) VALUES (?, ?, ?)",
-            (url, data, now()),
-        )
-
-    def save_favicon_data(self, url, data):
-        """Save favicon data to the database"""
-        Database.get(self.path).execute(self._do_save_favicon_data, url, data)
-
-    def get_favicon_data(self, url):
-        """Get favicon data from the database"""
-        result = Database.get(self.path).execute_and_wait(
-            lambda conn, u: (
-                conn.cursor()
-                .execute("SELECT data FROM favicons WHERE url=?", (u,))
-                .fetchone()
-            ),
-            url,
-        )
-        return result[0] if result else None
-
     def prune(self, days=400):
         def do_work(conn):
             self._init_db_schema(conn)
             c = conn.cursor()
             limit = now() - (days * DAY)
             c.execute(
-                "DELETE FROM places WHERE last_visit_date < ?; DELETE FROM favicons WHERE last_visit_date < ?",
-                (limit, limit),
+                "DELETE FROM places WHERE last_visit_date < ?;",
+                (limit,),
             )
 
         Database.get(self.path).execute_and_wait(do_work)
@@ -440,22 +403,14 @@ def import_from_firefox():
     global places
     from glob import glob
 
-    Database._instances.pop(
-        places.path, None
-    )  # ← invalide le cache Database pour ce path
-    #    (l'ancienne connexion APSW pointe vers un fichier qu'on va supprimer)
-    os.remove(places.path)  # ← supprime le fichier
-    places = Places()  # ← nouvelle instance (le path par défaut est le même)
+    Database._instances.pop(places.path, None)
+    os.remove(places.path)
+    places = Places()
 
-    conn = apsw.Connection(  # ← connexion Firefox, RESTE TELLE QUELLE
+    conn = apsw.Connection(
         glob(os.path.expanduser("~/.mozilla/firefox/*/places.sqlite"))[0]
     )
     place_id_map = {}
-    favicon_id_to_url = {}
-    place_to_favicon_id = {}
-
-    # Le `with places.conn:` original est SUPPRIMÉ — chaque execute_and_wait est atomique,
-    # mais l'ensemble ne l'est plus. C'est un compromis accepté.
 
     print("Importing places table")
     for (
@@ -466,24 +421,19 @@ def import_from_firefox():
         typed,
         frecency,
         last_visit_date,
-        favicon_id,
-    ) in conn.cursor().execute(  # ← lecture Firefox, inchangée
-        "SELECT id,url,title,visit_count,typed,frecency,last_visit_date,favicon_id FROM moz_places"
+    ) in conn.cursor().execute(
+        "SELECT id,url,title,visit_count,typed,frecency,last_visit_date FROM moz_places"
     ):
         if last_visit_date and visit_count and frecency > 0 and url:
-            place_id_map[place_id] = (
-                places.insert(  # ← places.insert DÉJÀ migré, ne change pas
-                    "places",
-                    url=url,
-                    title=title or "_",
-                    visit_count=visit_count,
-                    typed=typed,
-                    frecency=frecency,
-                    last_visit_date=last_visit_date,
-                )
+            place_id_map[place_id] = places.insert(
+                "places",
+                url=url,
+                title=title or "_",
+                visit_count=visit_count,
+                typed=typed,
+                frecency=frecency,
+                last_visit_date=last_visit_date,
             )
-            if favicon_id is not None and favicon_id > 0:
-                place_to_favicon_id[place_id] = favicon_id
 
     print("Importing visits table")
     items = []
@@ -491,7 +441,7 @@ def import_from_firefox():
         place_id,
         visit_date,
         visit_type,
-    ) in conn.cursor().execute(  # ← lecture Firefox, inchangée
+    ) in conn.cursor().execute(
         "SELECT place_id,visit_date,visit_type FROM moz_historyvisits"
     ):
         place_id = place_id_map.get(place_id)
@@ -504,33 +454,6 @@ def import_from_firefox():
                         1: QWebEnginePage.NavigationType.NavigationTypeLinkClicked,
                         2: QWebEnginePage.NavigationType.NavigationTypeTyped,
                     }[visit_type].value,
-                )
-            )
-
-    Database.get(places.path).execute_and_wait(
-        lambda c: c.executemany(
-            "INSERT INTO visits (place_id, visit_date, type) VALUES (?, ?, ?)",
-            items,
-        )
-    )
-
-    print("Importing favicons table")
-    ts = now()
-    for favicon_id, favicon_url in conn.cursor().execute(
-        "SELECT id,url FROM moz_favicons"
-    ):
-        favicon_id_to_url[favicon_id] = favicon_url
-        places.insert("favicons", url=favicon_url, last_visit_date=ts)
-
-    print("Linking favicons to places")
-    for old_place_id, favicon_id in place_to_favicon_id.items():
-        new_place_id = place_id_map.get(old_place_id)
-        favicon_url = favicon_id_to_url.get(favicon_id)
-        if new_place_id is not None and favicon_url:
-            Database.get(places.path).execute_and_wait(
-                lambda c: c.execute(
-                    "UPDATE places SET favicon_url = ? WHERE id = ?",
-                    (favicon_url, new_place_id),
                 )
             )
 

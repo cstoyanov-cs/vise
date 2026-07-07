@@ -26,25 +26,6 @@ CREATE TABLE visits (
 CREATE INDEX visits_place_id ON visits (place_id);
 CREATE INDEX visits_date ON visits (visit_date);
 
-CREATE TABLE favicons(
-	id INTEGER PRIMARY KEY,
-	url TEXT NOT NULL,
-	last_visit_date INTEGER DEFAULT 0 NOT NULL,
-  data BLOB,
-	UNIQUE(url)
-);
-CREATE INDEX favicons_last_visit_date ON favicons (last_visit_date);
-
-CREATE TABLE favicons_link(
-	id INTEGER PRIMARY KEY,
-	favicon_id INTEGER NOT NULL,
-	place_id INTEGER NOT NULL,
-	UNIQUE(favicon_id,place_id),
-	UNIQUE(place_id),
-	FOREIGN KEY(place_id) REFERENCES places(id) ON DELETE CASCADE,
-	FOREIGN KEY(favicon_id) REFERENCES favicons(id) ON DELETE CASCADE
-);
-
 CREATE TRIGGER url_insert_trg
         AFTER INSERT ON places
         BEGIN
