@@ -9,6 +9,7 @@ import os
 import pickle
 import signal
 import socket
+import hashlib
 import struct
 import sys
 import tempfile
@@ -30,8 +31,6 @@ from PyQt6.QtNetwork import (
     QAbstractSocket,
     QLocalServer,
     QLocalSocket,
-    QNetworkCacheMetaData,
-    QNetworkDiskCache,
     QSslSocket,
 )
 from PyQt6.QtWebEngineCore import QWebEngineUrlScheme
@@ -114,13 +113,6 @@ dark_color = QColor(45, 45, 45)
 dark_text_color = QColor("#ddd")
 
 
-def create_favicon_cache():
-    c = QNetworkDiskCache()
-    c.setCacheDirectory(os.path.join(cache_dir, "favicons"))
-    c.setMaximumCacheSize(25 * 1024 * 1024)
-
-    return c
-
 
 def dark_palette():
     p = QPalette()
@@ -158,6 +150,32 @@ def cleanup_sessions():
     sessions.sort(key=lambda x: os.path.getmtime(x), reverse=True)
     for old_session in sessions[3:]:
         os.remove(old_session)
+
+
+FAVICON_DIR = os.path.join(cache_dir, "favicons")  # dossier racine des favicons
+
+
+def favicon_path(url):
+    h = hashlib.md5(url.encode("utf-8")).hexdigest()
+    subdir = os.path.join(FAVICON_DIR, h[:2])
+    os.makedirs(subdir, exist_ok=True)
+    return os.path.join(subdir, h[2:])
+
+
+def save_favicon(url, data):
+    if not data:
+        return
+    path = favicon_path(url)
+    with open(path, "wb") as f:
+        f.write(data)
+
+
+def get_favicon(url):
+    path = favicon_path(url)
+    if os.path.exists(path):
+        with open(path, "rb") as f:
+            return f.read()
+    return None
 
 
 class Application(QApplication):
@@ -226,7 +244,6 @@ class Application(QApplication):
                 f.setFamily("Ubuntu")
             self.setFont(f)
         self.downloads = Downloads(self)
-        self.disk_cache = create_favicon_cache()
         self.key_filter = KeyFilter(self)
         self.installEventFilter(self.key_filter)
 
@@ -372,8 +389,6 @@ class Application(QApplication):
         if urls:
             self.open_urls(urls, in_current_tab="dynamic", switch_to_tab=True)
 
-
-
     def shutdown(self):
         self.lastWindowClosed.disconnect()
         cleanup_sessions()
@@ -510,26 +525,6 @@ class Application(QApplication):
         self.no_session = True
         self.shutdown()
 
-
-def save_favicon_in_cache(icon, qurl):
-    app = QApplication.instance()
-    if app is None : 
-        return
-    ic = icon_to_data(icon, w=None)
-    if not ic:
-        return
-    md = QNetworkCacheMetaData()
-    md.setUrl(qurl)
-    md.setSaveToDisk(True)
-    dio = app.disk_cache.prepare(md)
-    if not dio:
-        return
-    while len(ic) > 0:
-        written = dio.write(ic)
-        if written < 0:
-            return
-        ic = ic[written:]
-    app.disk_cache.insert(dio)
 
 def restart(state, env):
     import shlex

@@ -77,6 +77,7 @@ class Places:
         Database.get(self.path).execute(self._do_visit, qurl, visit_type)
 
     def _do_visit(self, conn, qurl, visit_type):
+        self._init_db_schema(conn)
         url = normalize(qurl.toString())
         timestamp = now()
         c = conn.cursor()
@@ -279,6 +280,7 @@ class Places:
         Database.get(self.path).execute(self._do_title_change, qurl, title)
 
     def _do_title_change(self, conn, qurl, title):
+        self._init_db_schema(conn)
         url = normalize(qurl.toString())
         c = conn.cursor()
         try:
@@ -297,21 +299,20 @@ class Places:
         Database.get(self.path).execute(self._do_favicon_change, qurl, favicon_qurl)
 
     def _do_favicon_change(self, conn, qurl, favicon_qurl):
+        self._init_db_schema(conn)
         url = qurl.toString()
         favicon = favicon_qurl.toString()
+        if not favicon:
+            return
         c = conn.cursor()
         try:
-            c.execute("SELECT id FROM places WHERE url=?", (url,))
-            place_id = next(c)[0]
+            place_id = next(c.execute("SELECT id FROM places WHERE url=?", (url,)))[0]
         except StopIteration:
             return
-        if favicon:
-            c.execute(
-                "UPDATE places SET favicon_url = ? WHERE id = ?",
-                (favicon, place_id),
-            )
-        else:
-            c.execute("UPDATE places SET favicon_url = NULL WHERE id = ?", (place_id,))
+        c.execute(
+            "UPDATE places SET favicon_url = ? WHERE id = ?",
+            (favicon, place_id),
+        )
 
     def prune(self, days=400):
         def do_work(conn):

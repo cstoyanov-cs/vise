@@ -413,10 +413,10 @@ class WebView(QWebEngineView):
             pass  # happens if page is deleted
 
     def on_icon_changed(self, icon):
-        from .main import save_favicon_in_cache
+        from .main import save_favicon
         icurl = self.iconUrl()
         if not icon.isNull():
-            save_favicon_in_cache(icon, icurl)
+            save_favicon(icurl.toString(), icon_to_data(icon))
         places.on_favicon_change(self.url(), icurl)
         self.icon_changed.emit(icon)
 
