@@ -13,19 +13,17 @@ from . import Command
 
 
 def search_engine(q):
-    ans = QUrl('https://duckduckgo.com')
+    ans = QUrl("https://duckduckgo.com")
     # ans = QUrl('https://duckduckgo.com/lite')
     # ans = QUrl('https://google.com/search')
 
-
     qq = QUrlQuery()
-    qq.addQueryItem('q', q.replace('+', '%2B'))
+    qq.addQueryItem("q", q.replace("+", "%2B"))
     ans.setQuery(qq)
     return ans
 
 
 class CompletionCandidate:
-
     def __init__(self, place_id, url, title, substrings):
         self.value = url
         self.place_id = place_id
@@ -48,11 +46,12 @@ class CompletionCandidate:
 
     @property
     def icon(self):
+        from ..main import get_favicon
         if self._icon is None:
             self._icon = QIcon()
             url = favicon_url(self.place_id)
             if url is not None:
-                raw = places.get_favicon_data(url)
+                raw = get_favicon(url)
                 if raw is not None:
                     p = QPixmap()
                     p.loadFromData(raw)
@@ -66,11 +65,15 @@ class CompletionCandidate:
     def draw_item(self, painter, style, option):
         option.features |= QStyleOptionViewItem.ViewItemFeature.HasDecoration
         option.icon = self.icon
-        text_rect = style.subElementRect(QStyle.SubElement.SE_ItemViewItemText, option, None)
+        text_rect = style.subElementRect(
+            QStyle.SubElement.SE_ItemViewItemText, option, None
+        )
         x, y = text_rect.x(), text_rect.y()
         y += int(text_rect.height() - self.left.size().height()) // 2
         if not option.icon.isNull():
-            icon_rect = style.subElementRect(QStyle.SubElement.SE_ItemViewItemDecoration, option, None)
+            icon_rect = style.subElementRect(
+                QStyle.SubElement.SE_ItemViewItemDecoration, option, None
+            )
             icon_rect.setTop(y), icon_rect.setBottom(int(text_rect.bottom()))
             option.icon.paint(painter, icon_rect)
         option.icon = QIcon()
@@ -83,34 +86,48 @@ class CompletionCandidate:
 
 
 class Open(Command):
-
-    names = {'open', 'tabopen', 'topen', 'wopen', 'winopen', 'popen', 'privateopen', 'copyurl'}
+    names = {
+        "open",
+        "tabopen",
+        "topen",
+        "wopen",
+        "winopen",
+        "popen",
+        "privateopen",
+        "copyurl",
+    }
 
     def completions(self, cmd, prefix):
         if not prefix:
             return []
-        substrings = prefix.split(' ')
+        substrings = prefix.split(" ")
         results = list(places.substring_matches(substrings))
         assert all(len(r) == 3 for r in results), "Expected 3-element tuples"
-        for place_id, *_ in results:
-            favicon_url(place_id)
-        items = [CompletionCandidate(place_id, url, title, substrings) for place_id, url, title in results]
+        items = [
+            CompletionCandidate(place_id, url, title, substrings)
+            for place_id, url, title in results
+        ]
         return items
 
     def __call__(self, cmd, rest, window):
-        if cmd == 'copyurl':
+        if cmd == "copyurl":
             QApplication.clipboard().setText(rest)
             window.save_url_in_places(parse_url(rest))
             return
         rest = rest.strip()
-        if rest.startswith('http://') or rest.startswith('https://') or rest.startswith('vise:') or rest.startswith('chrome://'):
+        if (
+            rest.startswith("http://")
+            or rest.startswith("https://")
+            or rest.startswith("vise:")
+            or rest.startswith("chrome://")
+        ):
             is_search = False
         else:
-            is_search = rest.strip() and (' ' in rest or '.' not in rest.strip('.'))
+            is_search = rest.strip() and (" " in rest or "." not in rest.strip("."))
         url = search_engine(rest) if is_search else parse_url(rest)
-        if cmd in {'open', 'topen', 'tabopen'}:
-            window.open_url(url, in_current_tab=cmd == 'open', switch_to_tab=True)
+        if cmd in {"open", "topen", "tabopen"}:
+            window.open_url(url, in_current_tab=cmd == "open", switch_to_tab=True)
         else:
-            window = QApplication.instance().new_window(is_private=cmd.startswith('p'))
+            window = QApplication.instance().new_window(is_private=cmd.startswith("p"))
             window.show()
             window.open_url(url, in_current_tab=True)

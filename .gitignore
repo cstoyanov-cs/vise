@@ -4,7 +4,7 @@ tags
 .build-cache
 resources/vise-client.js
 __pycache__
-
+file::memory:*
 # DEBUG PART
 .coveragerc
 vise/dap.lua

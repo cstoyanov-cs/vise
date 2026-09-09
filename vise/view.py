@@ -42,7 +42,7 @@ from .dev_tools import DevTools
 from .downloads import get_download_dir
 from .message_box import question_dialog
 from .passwd.db import key_from_url, password_db, password_exclusions
-from .places import places
+from .places import places, canonical_merge_key
 from .popup import Popup
 from .settings import gprefs
 from .site_permissions import site_permissions
@@ -381,8 +381,11 @@ class WebView(QWebEngineView):
         self.loading_status_changed.emit(False)
         u, ru = self._page.url(), self._page.requestedUrl()
         if u != ru:
-            if u.toString() == "https" + ru.toString()[4:]:
+            u_str, ru_str = u.toString(), ru.toString()
+            if u_str == "https" + ru_str[4:]:
                 places.merge_https_places(ru)
+            elif canonical_merge_key(u_str) == canonical_merge_key(ru_str):
+                places.merge_redirected_urls(ru, u)
 
     @property
     def scroll_position(self):
@@ -413,9 +416,10 @@ class WebView(QWebEngineView):
             pass  # happens if page is deleted
 
     def on_icon_changed(self, icon):
+        from .main import save_favicon
         icurl = self.iconUrl()
         if not icon.isNull():
-            places.save_favicon_data(icurl.toString(), icon_to_data(icon))
+            save_favicon(icurl.toString(), icon_to_data(icon))
         places.on_favicon_change(self.url(), icurl)
         self.icon_changed.emit(icon)
 
