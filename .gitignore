@@ -1,3 +1,4 @@
+file::memory:*
 tags
 *.pyj-cached
 .build-cache
