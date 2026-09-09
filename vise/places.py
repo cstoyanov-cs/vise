@@ -380,7 +380,7 @@ class Places:
             ]
             if len(matches) != 1:
                 return
-            place_id, _ = matches[0]  # noqa: existing_url not used
+            place_id, _ = matches[0]  # noqa: F841
             c.execute(
                 "UPDATE places SET url=? WHERE id=?",
                 (url, place_id),

@@ -1,5 +1,5 @@
 import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 import sys
 
 
@@ -11,7 +11,7 @@ def patch_qt_for_constants():
     else:
         qt_core = MagicMock()
         sys.modules['PyQt6.QtCore'] = qt_core
-    
+
     class MockKeyClass:
         _key_values = {
             'Key_Escape': 16777216,
@@ -21,23 +21,23 @@ def patch_qt_for_constants():
             'Key_A': 65,
             'Key_Q': 81,
         }
-        
+
         def __getattr__(self, name):
             if name.startswith('Key_') or name in self._key_values:
                 m = MagicMock()
                 m.value = self._key_values.get(name, 65)
                 return m
             raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
-        
+
         def __iter__(self):
             return iter(['Key_Escape', 'Key_Enter', 'Key_Return', 'Key_Tab', 'Key_A', 'Key_Q'])
-        
+
         def __contains__(self, item):
             return item in self._key_values or item.startswith('Key_')
-    
+
     qt_core.Qt = MagicMock()
     qt_core.Qt.Key = MockKeyClass()
-    
+
     yield
 
 

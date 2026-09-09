@@ -1,6 +1,6 @@
 import pytest
 import sys
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 
 @pytest.fixture(autouse=True)
@@ -26,13 +26,13 @@ class TestDevTools:
 
     def test_default_size_hint_sets_dimensions(self, mock_qt_modules):
         from vise.dev_tools import default_size_hint
-        
+
         mock_ans = MagicMock()
         mock_ans.setWidth = MagicMock()
         mock_ans.setHeight = MagicMock()
-        
+
         result = default_size_hint(mock_ans)
-        
+
         mock_ans.setWidth.assert_called_with(400)
         mock_ans.setHeight.assert_called_with(600)
         assert result is mock_ans

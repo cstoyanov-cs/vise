@@ -1,6 +1,6 @@
 import pytest
 import sys
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 
 @pytest.fixture(autouse=True)
@@ -26,59 +26,59 @@ def mock_vise_modules(mocker):
 
 class TestWarningDialog:
     def test_warning_dialog_returns_dialog(self, mock_qt_modules, mock_vise_modules, mocker):
-        from vise.message_box import warning_dialog, MessageBox
-        
+        from vise.message_box import warning_dialog
+
         mocker.patch("vise.message_box.MessageBox")
         mocker.patch("vise.message_box.MessageBox.exec", return_value=1)
-        
+
         result = warning_dialog(None, "Title", "Message", show=False)
-        
+
         assert result is not None
 
     def test_warning_dialog_calls_exec_when_show_true(self, mock_qt_modules, mock_vise_modules, mocker):
-        from vise.message_box import warning_dialog, MessageBox
-        
+        from vise.message_box import warning_dialog
+
         mock_instance = MagicMock()
         mock_instance.exec.return_value = 1
         mocker.patch("vise.message_box.MessageBox", return_value=mock_instance)
-        
-        result = warning_dialog(None, "Title", "Message", show=True)
-        
+
+        warning_dialog(None, "Title", "Message", show=True)
+
         mock_instance.exec.assert_called_once()
 
 
 class TestErrorDialog:
     def test_error_dialog_returns_dialog(self, mock_qt_modules, mock_vise_modules, mocker):
-        from vise.message_box import error_dialog, MessageBox
-        
+        from vise.message_box import error_dialog
+
         mocker.patch("vise.message_box.MessageBox")
         mocker.patch("vise.message_box.MessageBox.exec", return_value=1)
-        
+
         result = error_dialog(None, "Title", "Message", show=False)
-        
+
         assert result is not None
 
     def test_error_dialog_calls_exec_when_show_true(self, mock_qt_modules, mock_vise_modules, mocker):
-        from vise.message_box import error_dialog, MessageBox
-        
+        from vise.message_box import error_dialog
+
         mock_instance = MagicMock()
         mock_instance.exec.return_value = 1
         mocker.patch("vise.message_box.MessageBox", return_value=mock_instance)
-        
-        result = error_dialog(None, "Title", "Message", show=True)
-        
+
+        error_dialog(None, "Title", "Message", show=True)
+
         mock_instance.exec.assert_called_once()
 
 
 class TestQuestionDialog:
     def test_question_dialog_auto_skip(self, mock_qt_modules, mock_vise_modules, mocker):
         from vise.message_box import question_dialog
-        
+
         mocker.patch("vise.message_box.gprefs", new_callable=lambda: MagicMock(
             get=MagicMock(return_value=["test_skip"]),
             set=MagicMock()
         ))
-        
+
         result = question_dialog(None, "Title", "Message", skip_dialog_name="test_skip")
-        
+
         assert result is True

@@ -1,5 +1,4 @@
 import pytest
-from unittest.mock import MagicMock
 
 
 class TestCryptoFunctions:
@@ -9,7 +8,7 @@ class TestCryptoFunctions:
             CDLL('libsodium.so')
         except OSError:
             pytest.skip("libsodium not available")
-            
+
         from vise.crypto import random_bytes, derive_key_v1, encrypt_v1, decrypt_v1, nonce_size_v1, MessageForged
         assert callable(random_bytes)
         assert callable(derive_key_v1)
@@ -24,7 +23,7 @@ class TestCryptoFunctions:
             CDLL('libsodium.so')
         except OSError:
             pytest.skip("libsodium not available")
-            
+
         from vise.crypto import derive_key_v1, encrypt_v1, decrypt_v1
         key, salt = derive_key_v1("password")
         assert derive_key_v1("password", salt) == (key, salt)
@@ -39,7 +38,7 @@ class TestCryptoFunctions:
             CDLL('libsodium.so')
         except OSError:
             pytest.skip("libsodium not available")
-            
+
         from vise.crypto import derive_key_v1, encrypt_v1, decrypt_v1, MessageForged
         key, _ = derive_key_v1("password")
         data = b"test"

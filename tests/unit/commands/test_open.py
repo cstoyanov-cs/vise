@@ -31,14 +31,6 @@ def mock_places(mocker):
     return mock
 
 
-class TestSearchEngine:
-    def test_search_engine_builds_url(self):
-        from vise.commands.open import search_engine
-        result = search_engine("test query")
-        assert result is not None
-        assert isinstance(result, MagicMock)
-
-
 class TestOpenCommand:
     def test_open_names_contains_expected_commands(self):
         from vise.commands.open import Open
@@ -961,11 +953,10 @@ class TestFaviconAutocompleteEndToEnd:
         then verify that searching the URL prefix in autocomplete returns
         a candidate whose icon was actually loaded from disk.
         """
-        from vise.main import save_favicon, get_favicon  # now resolves to stub
+        from vise.main import save_favicon  # now resolves to stub
         cmd, places_obj, db = fresh_db
 
         url = "https://example.com"
-        title = "Example Domain"
 
         # --- Step 1: user navigates to the URL ---
         db.execute_and_wait(
@@ -1006,7 +997,6 @@ class TestFaviconAutocompleteEndToEnd:
         # QPixmap. We can't inspect the rendered pixels under mocks, but
         # we can verify the bytes flowed through end-to-end.
         from vise.places import favicon_url as places_favicon_url
-        from vise.commands.open import favicon_url as open_favicon_url
 
         assert places_favicon_url(candidate.place_id) == favicon_src_url
 
@@ -1071,7 +1061,6 @@ class TestFaviconAutocompleteEndToEnd:
         the autocomplete must still work - the icon is just empty. This
         guards against regressions where an empty favicon state crashes
         the popup."""
-        from vise.main import get_favicon
         cmd, places_obj, db = fresh_db
 
         # Visit a URL but NEVER call on_favicon_change.

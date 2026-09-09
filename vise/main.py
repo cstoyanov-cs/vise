@@ -52,7 +52,7 @@ from .passwd.db import key_from_url, password_db
 from .places import places
 from .settings import delete_profile
 from .style import Style
-from .utils import BusyCursor, icon_to_data, parse_url, pipe2
+from .utils import BusyCursor, parse_url, pipe2
 from .welcome import WELCOME_URL
 from .window import MainWindow
 

@@ -1,8 +1,6 @@
 import pytest
-import os
 import sys
-import json
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 
 @pytest.fixture(autouse=True)
@@ -16,14 +14,14 @@ def mock_qt_for_settings():
     mock_qt.QWebEngineScript.InjectionPoint = MagicMock()
     mock_qt.QWebEngineScript.InjectionPoint.DocumentCreation = 1
     mock_qt.QWebEngineProfile = MagicMock()
-    
+
     sys.modules['PyQt6'] = MagicMock()
     sys.modules['PyQt6.QtCore'] = mock_qt
     sys.modules['PyQt6.QtGui'] = mock_qt
     sys.modules['PyQt6.QtWidgets'] = mock_qt
     sys.modules['PyQt6.QtWebEngineCore'] = mock_qt
     sys.modules['PyQt6.QtWebEngineWidgets'] = mock_qt
-    
+
     yield
 
 
@@ -109,10 +107,10 @@ class TestCreateScript:
 class TestGetSpellLangs:
     def test_get_spell_langs_with_env_var(self, mocker):
         from vise.settings import get_spell_langs
-        
+
         mocker.patch("vise.settings.glob.glob", return_value=[])
         mocker.patch.dict("os.environ", {"QTWEBENGINE_DICTIONARIES_PATH": "/tmp/dictionaries"})
-        
+
         get_spell_langs.ans = None
         result = get_spell_langs()
         assert isinstance(result, list)
@@ -120,7 +118,7 @@ class TestGetSpellLangs:
 
 class TestDynamicPrefsClass:
     def test_dynamic_prefs_class_exists(self, mock_qt_for_settings):
-        from vise.settings import DynamicPrefs, nodef
+        from vise.settings import DynamicPrefs
         assert DynamicPrefs is not None
         assert hasattr(DynamicPrefs, '__init__')
         assert hasattr(DynamicPrefs, 'get')

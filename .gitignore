@@ -1,10 +1,29 @@
+# Build artifacts
 file::memory:*
 tags
 *.pyj-cached
 .build-cache
 resources/vise-client.js
 __pycache__
-file::memory:*
+
+# Python packaging (hatchling + uv)
+dist/
+build/
+*.egg-info/
+.eggs/
+.hatch/
+
+# Tooling caches
+.ruff_cache/
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# Venv
+.venv/
+venv/
+
 # DEBUG PART
 .coveragerc
 vise/dap.lua
@@ -12,3 +31,8 @@ vise/dap.lua
 # TESTS PART
 pytest.ini
 MagicMock
+
+# Editor / OS
+.idea/
+.vscode/
+.DS_Store

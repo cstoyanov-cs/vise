@@ -1,6 +1,4 @@
 import sys
-import os
-from pathlib import Path
 from unittest.mock import MagicMock
 import pytest
 
@@ -15,20 +13,20 @@ class MockQtKeyClass:
         'Key_A': 65,
         'Key_Q': 81,
     }
-    
+
     def __getattr__(self, name):
         if name.startswith('Key_') or name in self._key_values:
             m = MagicMock()
             m.value = self._key_values.get(name, 65)
             return m
         raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
-    
+
     def __iter__(self):
         return iter(['Key_Escape', 'Key_Enter', 'Key_Return', 'Key_Tab', 'Key_A', 'Key_Q'])
-    
+
     def __contains__(self, item):
         return item in self._key_values or item.startswith('Key_')
-    
+
     @property
     def __members__(self):
         return {k: MagicMock(value=v) for k, v in self._key_values.items()}
@@ -38,13 +36,13 @@ class QtMockModule:
     """Complete Qt mock module"""
     class Qt:
         Key = MockQtKeyClass()
-        
+
         class KeyboardModifier:
             ShiftModifier = MagicMock(value=0x02000000)
             ControlModifier = MagicMock(value=0x04000000)
             AltModifier = MagicMock(value=0x08000000)
             MetaModifier = MagicMock(value=0x10000000)
-    
+
     QEvent = MagicMock()
     QObject = MagicMock()
     QKeySequence = MagicMock()

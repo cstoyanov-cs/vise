@@ -1,5 +1,5 @@
 import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 import sys
 
 
@@ -67,7 +67,7 @@ class TestSwitchToTab:
         mock_window = MagicMock()
         mock_window.tab_tree = mock_tt
         cmd = SwitchToTab()
-        result = cmd("tab", "test", mock_window)
+        cmd("tab", "test", mock_window)
         mock_tt.activate_tab.assert_called()
 
     def test_switch_to_tab_call_no_match(self, mocker):
@@ -78,7 +78,7 @@ class TestSwitchToTab:
         mock_window.tab_tree = mock_tt
         mock_window.show_status_message = MagicMock()
         cmd = SwitchToTab()
-        result = cmd("tab", "notfound", mock_window)
+        cmd("tab", "notfound", mock_window)
         mock_window.show_status_message.assert_called()
 
 

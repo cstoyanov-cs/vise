@@ -12,7 +12,7 @@ def mock_qt_properly():
             del sys.modules[m]
 
     mock_qt_core = MagicMock()
-    
+
     class MockKeyEnum:
         __members__ = {
             'Key_A': MagicMock(value=65),
@@ -20,7 +20,7 @@ def mock_qt_properly():
             'Key_Escape': MagicMock(value=16777216),
             'Key_Q': MagicMock(value=81),
         }
-    
+
     mock_qt_core.Qt = MagicMock()
     mock_qt_core.Qt.Key = MockKeyEnum()
     mock_qt_core.Qt.KeyboardModifier = MagicMock()
@@ -33,7 +33,7 @@ def mock_qt_properly():
     mock_qt_core.QKeySequence = MagicMock()
     mock_qt_core.QKeySequence.fromString = MagicMock()
     mock_qt_core.QKeySequence.return_value.toString.return_value.encode.return_value.decode.return_value = "Test"
-    
+
     mock_qt_gui = MagicMock()
     mock_qt_gui.QKeySequence = MagicMock()
 
@@ -51,9 +51,9 @@ def mock_qt_properly():
         'normal mode keys': {},
         'insert mode keys': {}
     })
-    
+
     yield
-    
+
     for m in list(sys.modules.keys()):
         if m.startswith('vise') or m == 'vise':
             if m in sys.modules:

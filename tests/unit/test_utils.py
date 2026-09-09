@@ -1,8 +1,6 @@
 import pytest
-import os
 import sys
-from unittest.mock import MagicMock, patch
-from pathlib import Path
+from unittest.mock import MagicMock
 
 
 @pytest.fixture(autouse=True)

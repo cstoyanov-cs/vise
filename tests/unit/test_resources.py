@@ -1,7 +1,6 @@
 import pytest
 import sys
-from unittest.mock import MagicMock, patch
-from pathlib import Path
+from unittest.mock import MagicMock
 
 
 @pytest.fixture(autouse=True)
@@ -19,7 +18,7 @@ class TestGetIcon:
         mocker.patch("vise.resources.get_data_as_path", return_value="/fake/path/icon.png")
         from vise import resources
         resources.get_icon.cache_clear()
-        result = resources.get_icon("myicon")
+        resources.get_icon("myicon")
         resources.get_icon.cache_clear()
 
     def test_get_icon_with_images_prefix(self, mock_qt_modules, mocker):
@@ -27,5 +26,5 @@ class TestGetIcon:
         mocker.patch("vise.resources.get_data_as_path", return_value="/fake/path/images/icon.png")
         from vise import resources
         resources.get_icon.cache_clear()
-        result = resources.get_icon("images/myicon")
+        resources.get_icon("images/myicon")
         resources.get_icon.cache_clear()

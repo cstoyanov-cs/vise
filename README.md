@@ -42,25 +42,80 @@ Here is a list of Vise original features:
    settings
 
 
+Installation
+-------------
+
+### System requirements (linux)
+
+```bash
+sudo apt install libqt6webenginecore6 libsodium23
+```
+
+`libsodium` is loaded at runtime via `ctypes` and is therefore a system
+dependency, not a Python dependency.
+
+### Install with uv (recommended)
+
+```bash
+uv tool install git+https://github.com/<user>/vise
+vise
+```
+
+Or from a local checkout:
+
+```bash
+git clone https://github.com/<user>/vise
+cd vise
+uv tool install .
+vise
+```
+
+### Build the client side JavaScript
+
+The embedded web UI is written in RapydScript and must be compiled before the
+first run. RapydScript-NG is a JavaScript tool shipped with a `setup.py`
+shim, so it can be installed as a user-level Python script:
+
+```bash
+# system-wide or user-level, do NOT put it in the project venv
+pip install --user 'git+https://github.com/kovidgoyal/rapydscript-ng'
+
+# verify the binary is on PATH
+command -v rapydscript
+
+# build the client bundle
+sh build    # produces resources/vise-client.js
+```
+
+> RapydScript-NG has no `pyproject.toml`, so it is intentionally NOT listed
+> under `[project.optional-dependencies]` — uv/pip would refuse to build it
+> inside an isolated project venv. Keep it outside the project.
+
+
+Development
+-----------
+
+```bash
+git clone https://github.com/<user>/vise
+cd vise
+uv sync --extra dev
+uv run pytest          # run the test suite
+uv run ruff check      # lint
+uv run ruff format     # auto-format
+sh build               # rebuild client JS
+```
+
+The project uses [hatchling](https://hatch.pypa.io/) as build backend and
+[ruff](https://docs.astral.sh/ruff/) for linting/formatting. All tool
+configuration (pytest, coverage, ruff) lives in `pyproject.toml`. Hooks for
+[pre-commit](https://pre-commit.com/) are provided in
+`.pre-commit-config.yaml`; run `uv run pre-commit install` to enable them.
+
+
 Status
 --------
 
 vise is fully functional, and I use it as my daily browser. While the code in
 vise is fully cross-platform, currently it is only tested on linux, as I don't
-have the time/interest to test on other platforms. If you want to install vise
-for yourself on linux, you will need the dependencies listed in the
-dependencies.txt file and then checkout this repository (I assume below that it
-is checked out into the folder `~/work/vise`). Run:
-
-```
-rapydscript --js-version 6 --cache-dir ~/work/vise/.build-cache ~/work/vise/client/main.pyj > ~/work/vise/resources/vise-client.js
-```
-
-to build the client side JS vise uses. Once that is done, you can run vise
-straight out of the source code folder, like this:
-
-```
-python3 ~/work/vise
-```
-
+have the time/interest to test on other platforms.
 

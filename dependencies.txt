@@ -1,8 +1,0 @@
-apsw
-Qt >= 5.9.0 (with qt-webengine)
-PyQt >= 5.7.1
-libsodium
-python-yaml
-
-# Build time dependency
-rapydscript-ng (https://github.com/kovidgoyal/rapydscript-ng)

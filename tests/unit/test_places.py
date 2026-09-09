@@ -1,6 +1,5 @@
 import pytest
 import sys
-import os
 from unittest.mock import MagicMock, patch
 
 
@@ -11,14 +10,14 @@ def mock_qt_and_modules():
     mock_qt.QWebEnginePage = MagicMock()
     mock_qt.QWebEnginePage.NavigationType = MagicMock()
     mock_qt.QWebEnginePage.NavigationType.NavigationType = 0
-    
+
     sys.modules['PyQt6'] = MagicMock()
     sys.modules['PyQt6.QtCore'] = mock_qt
     sys.modules['PyQt6.QtGui'] = mock_qt
     sys.modules['PyQt6.QtWidgets'] = mock_qt
     sys.modules['PyQt6.QtWebEngineCore'] = mock_qt
     sys.modules['PyQt6.QtWebEngineWidgets'] = mock_qt
-    
+
     yield
 
 
