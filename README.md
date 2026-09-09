@@ -84,7 +84,7 @@ pip install --user 'git+https://github.com/kovidgoyal/rapydscript-ng'
 command -v rapydscript
 
 # build the client bundle
-sh build    # produces resources/vise-client.js
+sh build    # produces vise/data/vise-client.js (inside the package)
 ```
 
 > RapydScript-NG has no `pyproject.toml`, so it is intentionally NOT listed

@@ -9,7 +9,7 @@ from PyQt6.QtGui import QIcon
 
 
 def get_data_as_path(name):
-    base = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'resources')
+    base = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data')
     return os.path.join(base, name)
 
 
