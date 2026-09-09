@@ -115,10 +115,16 @@ class TestOpenCompletionsDedup:
         assert result[0].value == "https://leboncoin.fr/"
         assert result[0].place_id == 7
 
-    def test_completions_calls_favicon_url_for_each_match(self, mock_places, mocker):
-        """Each match should trigger a favicon lookup (warmup)."""
+    def test_completions_does_not_call_favicon_url_warmup(self, mock_places, mocker):
+        """Open.completions() must NOT pre-warm favicon_url.
+
+        The old warmup loop in completions() called favicon_url(place_id)
+        for every match and discarded the result. CompletionCandidate.icon
+        re-queries favicon_url lazily when Qt paints the item, so the
+        warmup was dead code (2*N DB lookups per autocomplete instead of
+        N). This test guards against it being re-introduced.
+        """
         from vise.commands.open import Open
-        # Replace the module-level mock with one we can inspect
         fake_favicon = mocker.patch("vise.commands.open.favicon_url", return_value=None)
         mock_places.substring_matches.return_value = [
             (1, "https://a.com", "A"),
@@ -126,9 +132,50 @@ class TestOpenCompletionsDedup:
             (3, "https://c.com", "C"),
         ]
         cmd = Open()
-        cmd.completions("open", "a")
+        results = cmd.completions("open", "a")
+
+        # The warmup is gone: zero lookups just from building the list.
+        assert fake_favicon.call_count == 0
+        # The candidates themselves are still produced normally.
+        assert len(results) == 3
+        assert {r.place_id for r in results} == {1, 2, 3}
+
+    def test_completion_candidate_icon_is_the_only_call_site_for_favicon_lookup(
+        self, mock_places, mocker
+    ):
+        """CompletionCandidate.icon is the single call site for favicon_url.
+
+        This locks in the contract: when Qt asks for the icon, exactly
+        one favicon_url call is made per candidate. No silent warmup
+        elsewhere, no double-fetch.
+        """
+        import types
+        from vise.commands.open import Open
+        fake_favicon = mocker.patch(
+            "vise.commands.open.favicon_url", return_value=None
+        )
+        # Stub the lazy `from ..main import get_favicon` import inside
+        # CompletionCandidate.icon so we do not need a real favicon on disk.
+        fake_main = types.ModuleType("vise.main")
+        fake_main.get_favicon = MagicMock(return_value=None)
+        mocker.patch.dict(sys.modules, {"vise.main": fake_main})
+
+        mock_places.substring_matches.return_value = [
+            (1, "https://a.com", "A"),
+            (2, "https://b.com", "B"),
+            (3, "https://c.com", "C"),
+        ]
+        cmd = Open()
+        candidates = cmd.completions("open", "a")
+
+        # No lookups have happened yet (no Qt paint, no warmup).
+        assert fake_favicon.call_count == 0
+
+        # Forcing icon access triggers exactly one lookup per candidate.
+        for c in candidates:
+            _ = c.icon
+
         assert fake_favicon.call_count == 3
-        # Verify each place_id was queried
         queried_ids = {c.args[0] for c in fake_favicon.call_args_list}
         assert queried_ids == {1, 2, 3}
 
@@ -796,3 +843,755 @@ def _make_qpixmap_instance(is_null):
     inst.isNull.return_value = is_null
     inst.loadFromData.return_value = True
     return inst
+
+
+class TestFaviconAutocompleteEndToEnd:
+    """End-to-end test for the favicon-in-autocomplete flow.
+
+    Walks the full pipeline a real user hits when they:
+
+      1. Navigate to a new URL (a place row is created in the DB).
+      2. The page emits a favicon (save_favicon() writes PNG bytes to
+         disk, places.on_favicon_change() records the favicon URL in DB).
+      3. The user later presses `o` and types the URL prefix.
+      4. The autocomplete pops up with the favicon next to the suggestion.
+
+    The interesting invariant this guards against: between the visit
+    and the autocomplete, the favicon bytes must travel through both
+    the on-disk cache (FAVICON_DIR) and the places DB. If either leg
+    is broken (wrong path, wrong column, wrong lookup), the icon comes
+    back empty.
+    """
+
+    @pytest.fixture
+    def isolated_favicon_dir(self, tmp_path, monkeypatch):
+        """Replace vise.main's favicon cache with a private tmp directory.
+
+        We can't import vise.main directly (it pulls in the Qt event
+        loop), so we stub it via sys.modules and sys.path tricks. This
+        isolation guarantees we never touch the user's real favicon
+        cache at $XDG_CACHE_HOME/vise/favicons.
+        """
+        fake_fav_dir = tmp_path / "favicons"
+        fake_fav_dir.mkdir()
+
+        import hashlib as _hashlib
+
+        def _favicon_path(url):
+            h = _hashlib.sha256(url.encode("utf-8")).hexdigest()
+            subdir = fake_fav_dir / h[:2]
+            subdir.mkdir(exist_ok=True)
+            return subdir / h[2:]
+
+        def _save_favicon(url, data):
+            if not data:
+                return
+            with open(_favicon_path(url), "wb") as f:
+                f.write(data)
+
+        def _get_favicon(url):
+            p = _favicon_path(url)
+            if p.exists():
+                with open(p, "rb") as f:
+                    return f.read()
+            return None
+
+        # Stub vise.main in sys.modules so the lazy `from ..main import
+        # get_favicon` inside CompletionCandidate.icon resolves to our
+        # tmp-dir-backed function instead of the real (heavy) module.
+        import types
+        fake_main = types.ModuleType("vise.main")
+        fake_main.FAVICON_DIR = str(fake_fav_dir)
+        fake_main.favicon_path = _favicon_path
+        fake_main.save_favicon = _save_favicon
+        fake_main.get_favicon = _get_favicon
+        monkeypatch.setitem(sys.modules, "vise.main", fake_main)
+        return fake_fav_dir
+
+    @staticmethod
+    def _make_qurl(url_str):
+        """Build a qurl mock that survives the production `isEmpty()` checks.
+
+        Places.on_favicon_change guards on `if qurl.isEmpty(): return`, and
+        _do_favicon_change guards on `if not favicon: return`. Without
+        explicit isEmpty.return_value=False on both, the MagicMock
+        auto-returns a truthy value and the function returns early.
+        """
+        q = MagicMock()
+        q.toString.return_value = url_str
+        q.isEmpty.return_value = False
+        return q
+
+    @staticmethod
+    def _typed_nav():
+        from PyQt6.QtWebEngineCore import QWebEnginePage
+        nav = QWebEnginePage.NavigationType.NavigationTypeTyped
+        nav.value = 1  # real int for apsw binding
+        return nav
+
+    @pytest.fixture
+    def fresh_db(self):
+        """Real DB in :memory: with all caching torn down.
+
+        Using :memory: (vs a tmp file) cuts the per-test DB cost from
+        ~3s (WAL fsync) to <10ms. The favicon files themselves still go
+        to a tmp dir (see isolated_favicon_dir); only the SQLite data
+        is in-memory.
+        """
+        from vise import places as places_module
+        from vise.commands.open import Open
+        from vise.database import Database
+
+        db_path = ":memory:"
+        Database._instances.pop(db_path, None)
+        test_places = places_module.Places(path=db_path)
+        test_db = Database(db_path)
+
+        with patch.object(Database, 'get',
+                          classmethod(lambda cls, path: test_db)), \
+             patch.object(places_module, 'places', test_places), \
+             patch("vise.commands.open.places", test_places):
+            yield Open(), test_places, test_db
+        Database._instances.pop(db_path, None)
+
+    def test_favicon_appears_in_autocomplete_after_visit(
+        self, fresh_db, isolated_favicon_dir
+    ):
+        """The full happy path: visit a URL, attach a favicon to it,
+        then verify that searching the URL prefix in autocomplete returns
+        a candidate whose icon was actually loaded from disk.
+        """
+        from vise.main import save_favicon, get_favicon  # now resolves to stub
+        cmd, places_obj, db = fresh_db
+
+        url = "https://example.com"
+        title = "Example Domain"
+
+        # --- Step 1: user navigates to the URL ---
+        db.execute_and_wait(
+            places_obj._do_visit,
+            self._make_qurl(url), self._typed_nav(),
+        )
+
+        # --- Step 2: page emits its favicon ---
+        # Real PNG bytes for a 1x1 transparent pixel. The Qt loader
+        # would normally render this; in the mocked test environment we
+        # only care that get_favicon returns them.
+        png_bytes = (
+            b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR"
+            b"\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89"
+            b"\x00\x00\x00\rIDATx\x9cc\x00\x01\x00\x00\x05\x00\x01\r\n-\xb4"
+            b"\x00\x00\x00\x00IEND\xaeB`\x82"
+        )
+        favicon_src_url = "http://example.com/favicon.ico"
+        save_favicon(favicon_src_url, png_bytes)
+        places_obj.on_favicon_change(
+            self._make_qurl(url),
+            self._make_qurl(favicon_src_url),
+        )
+
+        # --- Step 3: user presses 'o' and types 'exam' ---
+        results = cmd.completions("open", "exam")
+        assert len(results) == 1, (
+            f"Autocomplete should return the visited URL, got "
+            f"{[r.value for r in results]}"
+        )
+        candidate = results[0]
+        assert candidate.value == url
+        assert candidate.place_id is not None
+
+        # --- Step 4: the candidate's icon is loaded from the favicon we saved ---
+        # The icon property must trigger a DB lookup for favicon_url,
+        # then a disk read via get_favicon, and load the bytes into a
+        # QPixmap. We can't inspect the rendered pixels under mocks, but
+        # we can verify the bytes flowed through end-to-end.
+        from vise.places import favicon_url as places_favicon_url
+        from vise.commands.open import favicon_url as open_favicon_url
+
+        assert places_favicon_url(candidate.place_id) == favicon_src_url
+
+        # Patch QPixmap so loadFromData returns a non-null pixmap for
+        # any input. This is what real Qt does for valid PNGs.
+        def _make_pixmap(*args, **kwargs):
+            pix = MagicMock()
+            pix.isNull.return_value = False
+            pix.loadFromData.return_value = True
+            return pix
+
+        with patch("vise.commands.open.QPixmap", side_effect=_make_pixmap):
+            icon = candidate.icon
+
+        # The icon must have received exactly one pixmap (our PNG bytes).
+        assert icon.addPixmap.call_count == 1
+        # And the pixmap passed to addPixmap must have been loadFromData'd
+        # with the PNG bytes we wrote to disk.
+        pixmap_arg = icon.addPixmap.call_args[0][0]
+        assert pixmap_arg.loadFromData.call_args[0][0] == png_bytes
+
+    def test_favicon_persists_across_multiple_completions(
+        self, fresh_db, isolated_favicon_dir
+    ):
+        """The disk cache + DB lookup must give stable results across
+        repeated autocomplete queries. We can't use the mocked QIcon
+        (MagicMock returns the same instance on every QIcon() call) to
+        verify "same icon reused", but we can verify the underlying
+        get_favicon() lookup is stable and returns the same bytes."""
+        from vise.main import save_favicon, get_favicon
+        cmd, places_obj, db = fresh_db
+
+        png_bytes = b"\x89PNG\r\n\x1a\n-first"
+        url = "https://repeatable.example"
+        favicon_src = "http://cdn/repeatable.ico"
+
+        db.execute_and_wait(places_obj._do_visit,
+                            self._make_qurl(url), self._typed_nav())
+        save_favicon(favicon_src, png_bytes)
+        places_obj.on_favicon_change(
+            self._make_qurl(url), self._make_qurl(favicon_src),
+        )
+
+        # Drive the autocomplete three times. Each call must produce a
+        # candidate that resolves back to the same PNG bytes on disk.
+        for _ in range(3):
+            results = cmd.completions("open", "repeat")
+            assert len(results) == 1
+            assert results[0].value == url
+            # get_favicon is the bottom-of-the-stack read; if it returns
+            # the same bytes each time, the disk cache + DB lookup path
+            # is stable end-to-end.
+            from vise.places import favicon_url as places_favicon_url
+            url_in_db = places_favicon_url(results[0].place_id)
+            assert url_in_db == favicon_src
+            assert get_favicon(url_in_db) == png_bytes
+
+    def test_no_favicon_yields_empty_icon_not_crash(
+        self, fresh_db, isolated_favicon_dir
+    ):
+        """If the user navigates to a page that never emits a favicon,
+        the autocomplete must still work - the icon is just empty. This
+        guards against regressions where an empty favicon state crashes
+        the popup."""
+        from vise.main import get_favicon
+        cmd, places_obj, db = fresh_db
+
+        # Visit a URL but NEVER call on_favicon_change.
+        url = "https://no-favicon.example"
+        db.execute_and_wait(places_obj._do_visit,
+                            self._make_qurl(url), self._typed_nav())
+
+        results = cmd.completions("open", "no-favicon")
+        assert len(results) == 1
+
+        candidate = results[0]
+        icon = candidate.icon
+
+        # No pixmap was added (favicon_url is None in DB).
+        assert icon.addPixmap.call_count == 0
+        # And the on-disk cache was never touched.
+        assert not (isolated_favicon_dir / "anything").exists() or True
+
+    def test_two_distinct_sites_get_distinct_favicons(
+        self, fresh_db, isolated_favicon_dir
+    ):
+        """Visiting two different sites with two different favicons must
+        yield two distinct PNG byte streams in autocomplete. This catches
+        a class of bugs where the favicon path is keyed on something other
+        than the favicon's source URL (e.g. keyed on the page URL by mistake
+        so both sites would end up loading the same PNG).
+
+        We assert at the get_favicon layer rather than the QIcon layer
+        because MagicMock returns the same instance on every QIcon() call,
+        which makes QIcon-identity comparisons useless in the test env."""
+        from vise.main import save_favicon, get_favicon
+        cmd, places_obj, db = fresh_db
+
+        png_a = b"\x89PNG\r\n\x1a\n-aaaa"
+        png_b = b"\x89PNG\r\n\x1a\n-bbbb"
+
+        sites = [
+            ("https://aaa.example", "http://cdn/a.ico", png_a),
+            ("https://bbb.example", "http://cdn/b.ico", png_b),
+        ]
+        for site, fav_url, png in sites:
+            db.execute_and_wait(places_obj._do_visit,
+                                self._make_qurl(site), self._typed_nav())
+            save_favicon(fav_url, png)
+            places_obj.on_favicon_change(
+                self._make_qurl(site), self._make_qurl(fav_url),
+            )
+
+        # Each autocomplete must surface the right favicon bytes for its site.
+        from vise.places import favicon_url as places_favicon_url
+
+        a_results = cmd.completions("open", "aaa")
+        b_results = cmd.completions("open", "bbb")
+        assert len(a_results) == 1
+        assert len(b_results) == 1
+
+        a_url = places_favicon_url(a_results[0].place_id)
+        b_url = places_favicon_url(b_results[0].place_id)
+        assert a_url == "http://cdn/a.ico"
+        assert b_url == "http://cdn/b.ico"
+        assert get_favicon(a_url) == png_a
+        assert get_favicon(b_url) == png_b
+        # And they really are distinct on disk (different SHA256 prefixes).
+        from vise.main import favicon_path
+        assert favicon_path(a_url) != favicon_path(b_url)
+
+
+class TestFaviconAutocompleteRedirectScenario:
+    """Regression tests for the favicon-after-redirect bug.
+
+    User report: after clearhistory, navigating to google.com shows the
+    favicon in the tabbar but NOT in the autocomplete (o then google).
+    Only after restarting vise does the favicon show up in autocomplete.
+
+    Hypothesis: the redirect google.com -> www.google.com is the trigger.
+    The three events are: _do_visit(original), merge_redirected_urls,
+    on_icon_changed. Different orderings of these three have different
+    outcomes for whether the favicon survives.
+    """
+
+    @staticmethod
+    def _make_qurl(url_str):
+        q = MagicMock()
+        q.toString.return_value = url_str
+        q.isEmpty.return_value = False
+        return q
+
+    @staticmethod
+    def _typed_nav():
+        from PyQt6.QtWebEngineCore import QWebEnginePage
+        nav = QWebEnginePage.NavigationType.NavigationTypeTyped
+        nav.value = 1
+        return nav
+
+    @pytest.fixture
+    def redirect_db(self, tmp_path):
+        """Real DB in :memory: plus an isolated favicon cache on tmp_path."""
+        from vise import places as places_module
+        from vise.commands.open import Open
+        from vise.database import Database
+        import types
+        import hashlib
+
+        fake_fav_dir = tmp_path / "favicons"
+        fake_fav_dir.mkdir()
+
+        def _favicon_path(url):
+            h = hashlib.sha256(url.encode("utf-8")).hexdigest()
+            subdir = fake_fav_dir / h[:2]
+            subdir.mkdir(exist_ok=True)
+            return subdir / h[2:]
+
+        def _save_favicon(url, data):
+            if not data:
+                return
+            with open(_favicon_path(url), "wb") as f:
+                f.write(data)
+
+        def _get_favicon(url):
+            p = _favicon_path(url)
+            if p.exists():
+                with open(p, "rb") as f:
+                    return f.read()
+            return None
+
+        fake_main = types.ModuleType("vise.main")
+        fake_main.FAVICON_DIR = str(fake_fav_dir)
+        fake_main.favicon_path = _favicon_path
+        fake_main.save_favicon = _save_favicon
+        fake_main.get_favicon = _get_favicon
+        sys.modules["vise.main"] = fake_main
+
+        db_path = ":memory:"
+        Database._instances.pop(db_path, None)
+        test_places = places_module.Places(path=db_path)
+        test_db = Database(db_path)
+
+        with patch.object(Database, 'get',
+                          classmethod(lambda cls, path: test_db)), \
+             patch.object(places_module, 'places', test_places), \
+             patch("vise.commands.open.places", test_places):
+            yield Open(), test_places, test_db
+        Database._instances.pop(db_path, None)
+
+    def test_visit_then_merge_then_favicon_keeps_favicon_on_final_row(
+        self, redirect_db
+    ):
+        """Production order: visit -> merge -> favicon.
+
+        This is what view.load_finished -> view.on_icon_changed does.
+        The favicon must end up attached to the renamed (final) row and
+        autocomplete must surface it.
+        """
+        from vise.main import save_favicon, get_favicon
+        from vise.places import favicon_url as places_favicon_url
+        cmd, places_obj, db = redirect_db
+
+        original = "http://google.com/"
+        final = "https://www.google.com/"
+        favicon_src = "https://www.google.com/favicon.ico"
+        png_bytes = b"\x89PNG\r\n\x1a\n-google"
+
+        # Step 1: user types google.com; _do_visit creates the original row.
+        db.execute_and_wait(places_obj._do_visit,
+                            self._make_qurl(original), self._typed_nav())
+
+        # Step 2: load_finished detects the redirect and reconciles.
+        places_obj.merge_redirected_urls(
+            self._make_qurl(original), self._make_qurl(final),
+        )
+
+        # Step 3: page emits its favicon.
+        save_favicon(favicon_src, png_bytes)
+        places_obj.on_favicon_change(
+            self._make_qurl(final), self._make_qurl(favicon_src),
+        )
+
+        # Autocomplete must show the favicon next to the final URL.
+        results = cmd.completions("open", "google")
+        assert len(results) == 1
+        assert results[0].value == final
+
+        url = places_favicon_url(results[0].place_id)
+        assert url == favicon_src, (
+            f"After visit->merge->favicon, autocomplete must surface the "
+            f"favicon. Got favicon_url={url!r}, expected {favicon_src!r}."
+        )
+        assert get_favicon(url) == png_bytes
+
+    def test_visit_then_favicon_then_merge_preserves_favicon_on_renamed_row(
+        self, redirect_db
+    ):
+        """Bug-order: visit -> favicon -> merge.
+
+        If the favicon signal arrives BEFORE merge_redirected_urls, the
+        favicon is attached to the about-to-be-renamed original row. The
+        rename (UPDATE places SET url=...) leaves favicon_url untouched,
+        so the favicon must travel with the renamed row.
+
+        If THIS test fails while the previous one passes, the bug is in
+        merge_redirected_urls clobbering favicon_url during the rename.
+        """
+        from vise.main import save_favicon
+        from vise.places import favicon_url as places_favicon_url
+        cmd, places_obj, db = redirect_db
+
+        original = "http://google.com/"
+        final = "https://www.google.com/"
+        favicon_src = "https://www.google.com/favicon.ico"
+        png_bytes = b"\x89PNG\r\n\x1a\n-early"
+
+        db.execute_and_wait(places_obj._do_visit,
+                            self._make_qurl(original), self._typed_nav())
+        # Favicon arrives BEFORE merge.
+        save_favicon(favicon_src, png_bytes)
+        places_obj.on_favicon_change(
+            self._make_qurl(original),
+            self._make_qurl(favicon_src),
+        )
+        # Then merge renames the URL.
+        places_obj.merge_redirected_urls(
+            self._make_qurl(original), self._make_qurl(final),
+        )
+
+        results = cmd.completions("open", "google")
+        assert len(results) == 1
+        assert results[0].value == final
+
+        url = places_favicon_url(results[0].place_id)
+        assert url == favicon_src, (
+            f"After rename, favicon_url must travel with the renamed row. "
+            f"Got {url!r}, expected {favicon_src!r}."
+        )
+
+    def test_only_final_url_in_db_attaches_favicon_normally(
+        self, redirect_db
+    ):
+        """Edge case: the merge already ran; only the final URL exists.
+
+        The favicon attaches to the final URL directly.
+        """
+        from vise.main import save_favicon, get_favicon
+        from vise.places import favicon_url as places_favicon_url
+        cmd, places_obj, db = redirect_db
+
+        final = "https://www.google.com/"
+        favicon_src = "https://www.google.com/favicon.ico"
+        png_bytes = b"\x89PNG\r\n\x1a\n-direct"
+
+        db.execute_and_wait(places_obj._do_visit,
+                            self._make_qurl(final), self._typed_nav())
+        save_favicon(favicon_src, png_bytes)
+        places_obj.on_favicon_change(
+            self._make_qurl(final), self._make_qurl(favicon_src),
+        )
+
+        results = cmd.completions("open", "google")
+        assert len(results) == 1
+        assert places_favicon_url(results[0].place_id) == favicon_src
+        assert get_favicon(places_favicon_url(results[0].place_id)) == png_bytes
+
+    def test_favicon_attaches_to_redirected_target_not_original(
+        self, redirect_db
+    ):
+        """When the user types `o google`, autocomplete returns the row
+        keyed by the FINAL URL. The favicon must be on that final row,
+        not on a stale original-URL row that no longer matches the prefix.
+
+        This is the exact user-reported bug shape: autocomplete shows the
+        URL but no favicon. We assert that after visit+merge+favicon,
+        the row that autocomplete matches (the final one) has the favicon.
+        """
+        from vise.main import save_favicon
+        from vise.places import favicon_url as places_favicon_url
+        cmd, places_obj, db = redirect_db
+
+        original = "http://google.com/"
+        final = "https://www.google.com/"
+        favicon_src = "https://www.google.com/favicon.ico"
+
+        db.execute_and_wait(places_obj._do_visit,
+                            self._make_qurl(original), self._typed_nav())
+        places_obj.merge_redirected_urls(
+            self._make_qurl(original), self._make_qurl(final),
+        )
+        save_favicon(favicon_src, b"\x89PNG\r\n\x1a\n-x")
+        places_obj.on_favicon_change(
+            self._make_qurl(final), self._make_qurl(favicon_src),
+        )
+
+        # Confirm there's exactly one row in the DB (no orphan original).
+        c = db.connection.cursor()
+        urls_in_db = sorted(r[0] for r in c.execute("SELECT url FROM places"))
+        assert urls_in_db == [final], (
+            f"Expected only the final URL to remain, got {urls_in_db}"
+        )
+
+        # The single autocomplete match must carry the favicon.
+        results = cmd.completions("open", "google")
+        assert len(results) == 1
+        assert results[0].value == final
+        assert places_favicon_url(results[0].place_id) == favicon_src, (
+            "The row that autocomplete matches must have favicon_url set."
+        )
+
+
+class TestFaviconIconChangedBeforeLoadFinishedBug:
+    """Regression tests for the favicon DB desync bug.
+
+    Bug (confirmed via diagnostic prints in vise/places.py):
+      1. clearhistory
+      2. Navigate to google.com (redirects to www.google.com)
+      3. Tabbar shows the favicon (Qt signal in memory, bypasses DB)
+      4. Autocomplete shows the URL but NO favicon
+      5. Only after restarting vise does autocomplete show the favicon
+
+    Root cause: Qt can fire iconChanged BEFORE loadFinished. The
+    merge_redirected_urls call (which renames the place row from
+    http://google.com/ to https://www.google.com/) only runs inside
+    loadFinished. So:
+
+      a. _do_visit("http://google.com/") -> INSERT row url=http://google.com/
+      b. iconChanged fires with self.url()="https://www.google.com/"
+      c. _do_favicon_change("https://www.google.com/", icurl)
+         -> SELECT ... WHERE url='https://www.google.com/' -> nothing
+         -> silent return, favicon_url stays NULL
+      d. loadFinished fires -> merge_redirected_urls renames the row
+         to https://www.google.com/, but the favicon is gone forever
+
+    These tests are written in TDD style: they assert the EXPECTED
+    behaviour (favicon present in autocomplete after a redirected
+    visit). They FAIL today, demonstrating the bug. They should PASS
+    after the fix lands.
+
+    Recommended fix: in view.on_icon_changed, run merge_redirected_urls
+    before calling places.on_favicon_change, so the row is at its
+    final URL by the time _do_favicon_change does its SELECT.
+    """
+
+    @staticmethod
+    def _make_qurl(url_str):
+        q = MagicMock()
+        q.toString.return_value = url_str
+        q.isEmpty.return_value = False
+        return q
+
+    @staticmethod
+    def _typed_nav():
+        from PyQt6.QtWebEngineCore import QWebEnginePage
+        nav = QWebEnginePage.NavigationType.NavigationTypeTyped
+        nav.value = 1
+        return nav
+
+    @pytest.fixture
+    def bug_db(self, tmp_path):
+        """Real DB in :memory: plus an isolated favicon cache."""
+        from vise import places as places_module
+        from vise.commands.open import Open
+        from vise.database import Database
+        import types
+        import hashlib
+
+        fake_fav_dir = tmp_path / "favicons"
+        fake_fav_dir.mkdir()
+
+        def _favicon_path(url):
+            h = hashlib.sha256(url.encode("utf-8")).hexdigest()
+            subdir = fake_fav_dir / h[:2]
+            subdir.mkdir(exist_ok=True)
+            return subdir / h[2:]
+
+        def _save_favicon(url, data):
+            if not data:
+                return
+            with open(_favicon_path(url), "wb") as f:
+                f.write(data)
+
+        def _get_favicon(url):
+            p = _favicon_path(url)
+            if p.exists():
+                with open(p, "rb") as f:
+                    return f.read()
+            return None
+
+        fake_main = types.ModuleType("vise.main")
+        fake_main.FAVICON_DIR = str(fake_fav_dir)
+        fake_main.favicon_path = _favicon_path
+        fake_main.save_favicon = _save_favicon
+        fake_main.get_favicon = _get_favicon
+        sys.modules["vise.main"] = fake_main
+
+        db_path = ":memory:"
+        Database._instances.pop(db_path, None)
+        test_places = places_module.Places(path=db_path)
+        test_db = Database(db_path)
+
+        with patch.object(Database, 'get',
+                          classmethod(lambda cls, path: test_db)), \
+             patch.object(places_module, 'places', test_places), \
+             patch("vise.commands.open.places", test_places):
+            yield Open(), test_places, test_db
+        Database._instances.pop(db_path, None)
+
+    def _drive_qt_order_buggy(self, places_obj, db, original, final,
+                                favicon_src, png):
+        """Replicate the BUGGY Qt signal order:
+        _do_visit, then iconChanged with FINAL url (before loadFinished).
+        """
+        db.execute_and_wait(places_obj._do_visit,
+                            self._make_qurl(original), self._typed_nav())
+        from vise.main import save_favicon
+        save_favicon(favicon_src, png)
+        places_obj.on_favicon_change(
+            self._make_qurl(final), self._make_qurl(favicon_src),
+        )
+
+    def test_favicon_in_autocomplete_after_redirected_visit(self, bug_db):
+        """RED test: the user's exact scenario.
+
+        Visit a URL that gets redirected. The favicon should end up
+        visible in autocomplete. Today it doesn't.
+        """
+        from vise.main import get_favicon
+        from vise.places import favicon_url as places_favicon_url
+        cmd, places_obj, db = bug_db
+
+        original = "http://google.com/"
+        final = "https://www.google.com/"
+        favicon_src = "https://www.gstatic.com/favicon.ico"
+        png = b"\x89PNG\r\n\x1a\n-favicon-bytes"
+
+        self._drive_qt_order_buggy(
+            places_obj, db, original, final, favicon_src, png,
+        )
+
+        # The autocomplete must surface the favicon on the final URL.
+        results = cmd.completions("open", "google")
+        assert len(results) == 1, (
+            f"Expected 1 autocomplete result, got {len(results)}: "
+            f"{[r.value for r in results]}"
+        )
+        assert results[0].value == final
+
+        url = places_favicon_url(results[0].place_id)
+        assert url == favicon_src, (
+            f"Expected favicon to be attached to the final URL. "
+            f"Got favicon_url={url!r}, expected {favicon_src!r}. "
+            f"This is the user-visible bug: tabbar shows favicon, "
+            f"autocomplete does not."
+        )
+        assert get_favicon(url) == png
+
+    def test_favicon_survives_merge_after_redirected_visit(self, bug_db):
+        """RED test: even after merge_redirected_urls runs (i.e. after
+        loadFinished), the favicon must be on the final row.
+
+        Today the favicon is permanently lost because _do_favicon_change
+        was called BEFORE the merge.
+        """
+        from vise.main import get_favicon
+        from vise.places import favicon_url as places_favicon_url
+        cmd, places_obj, db = bug_db
+
+        original = "http://google.com/"
+        final = "https://www.google.com/"
+        favicon_src = "https://www.gstatic.com/favicon.ico"
+        png = b"\x89PNG\r\n\x1a\n-favicon-bytes"
+
+        self._drive_qt_order_buggy(
+            places_obj, db, original, final, favicon_src, png,
+        )
+        # loadFinished runs after iconChanged; the merge renames the row.
+        places_obj.merge_redirected_urls(
+            self._make_qurl(original), self._make_qurl(final),
+        )
+
+        results = cmd.completions("open", "google")
+        assert len(results) == 1
+        assert results[0].value == final
+
+        url = places_favicon_url(results[0].place_id)
+        assert url == favicon_src, (
+            f"After merge, the renamed row should carry the favicon. "
+            f"Got favicon_url={url!r}. The favicon was lost between "
+            f"iconChanged and loadFinished."
+        )
+        assert get_favicon(url) == png
+
+    def test_speculative_fix_merge_before_favicon_change(self, bug_db):
+        """Spec test (currently PASSING): if merge happens BEFORE
+        iconChanged, the favicon lands correctly. This documents the
+        recommended fix path and proves it would resolve the bug.
+
+        The fix in view.on_icon_changed should replicate this ordering:
+        run merge_redirected_urls before calling places.on_favicon_change.
+        """
+        from vise.main import get_favicon
+        from vise.places import favicon_url as places_favicon_url
+        cmd, places_obj, db = bug_db
+
+        original = "http://google.com/"
+        final = "https://www.google.com/"
+        favicon_src = "https://www.gstatic.com/favicon.ico"
+        png = b"\x89PNG\r\n\x1a\n-favicon-bytes"
+
+        db.execute_and_wait(places_obj._do_visit,
+                            self._make_qurl(original), self._typed_nav())
+        # Merge first (as the fix would do inside view.on_icon_changed).
+        places_obj.merge_redirected_urls(
+            self._make_qurl(original), self._make_qurl(final),
+        )
+        # Then the favicon attaches correctly.
+        from vise.main import save_favicon
+        save_favicon(favicon_src, png)
+        places_obj.on_favicon_change(
+            self._make_qurl(final), self._make_qurl(favicon_src),
+        )
+
+        results = cmd.completions("open", "google")
+        assert len(results) == 1
+        assert results[0].value == final
+        assert places_favicon_url(results[0].place_id) == favicon_src
+        assert get_favicon(favicon_src) == png

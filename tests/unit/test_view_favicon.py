@@ -114,6 +114,13 @@ def web_view(view_module):
     view = vw.WebView.__new__(vw.WebView)
     # Attach a controllable icon_changed signal stub.
     view.icon_changed = MagicMock()
+    # Stub _page so the new on_icon_changed (which calls
+    # self._page.requestedUrl() for the redirect-detection fix) doesn't
+    # crash. Default: requestedUrl == url, i.e. no redirect, so the
+    # merge branch is skipped.
+    page = MagicMock()
+    page.requestedUrl.return_value.toString.return_value = ""
+    view._page = page
     return view
 
 

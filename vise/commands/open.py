@@ -103,8 +103,6 @@ class Open(Command):
         substrings = prefix.split(" ")
         results = list(places.substring_matches(substrings))
         assert all(len(r) == 3 for r in results), "Expected 3-element tuples"
-        for place_id, *_ in results:
-            favicon_url(place_id)
         items = [
             CompletionCandidate(place_id, url, title, substrings)
             for place_id, url, title in results

@@ -239,6 +239,7 @@ class Places:
         Database.get(self.path).execute_and_wait(do_work)
 
     def merge_redirected_urls(self, requested_qurl, final_qurl):
+
         """Reconcile the places DB after a browser redirect.
 
         Three cases are handled:
@@ -246,11 +247,6 @@ class Places:
         - Only the requested URL exists: rename it to the final URL (the user ended
           up on the final URL, the requested was just the entry point).
         - Only the final URL exists (or neither): nothing to do.
-
-        This is needed because Qt often fires acceptNavigationRequest only for the
-        originally-requested URL, so _do_visit records the http entry but never
-        creates the final https entry. Without this rename, the http entry would
-        remain in the DB forever and autocomplete would surface a stale URL.
         """
 
         def do_work(conn):
@@ -375,7 +371,20 @@ class Places:
         try:
             place_id = next(c.execute("SELECT id FROM places WHERE url=?", (url,)))[0]
         except StopIteration:
-            return
+            target_key = canonical_merge_key(url)
+            matches = [
+                (pid, existing_url) for pid, existing_url in c.execute(
+                    "SELECT id, url FROM places"
+                )
+                if canonical_merge_key(existing_url) == target_key
+            ]
+            if len(matches) != 1:
+                return
+            place_id, _ = matches[0]  # noqa: existing_url not used
+            c.execute(
+                "UPDATE places SET url=? WHERE id=?",
+                (url, place_id),
+            )
         c.execute(
             "UPDATE places SET favicon_url = ? WHERE id = ?",
             (favicon, place_id),
