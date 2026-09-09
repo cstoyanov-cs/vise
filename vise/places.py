@@ -26,6 +26,27 @@ def normalize(x):
     return unicodedata.normalize("NFC", x)
 
 
+def canonical_merge_key(url):
+    """Return a canonical key for URL equivalence after a browser redirect.
+
+    Two URLs are 'merge-equivalent' when they share the same host after
+    lowercasing and stripping a leading 'www.' (with default ports normalized).
+    Scheme, path, query, and fragment are intentionally ignored because
+    redirects frequently change the scheme (http -> https) and the path
+    (e.g. a regional landing page like https://www.x.com/fr) while still
+    pointing at the same logical site.
+    """
+    from urllib.parse import urlsplit
+    parts = urlsplit(url)
+    host = parts.netloc.lower()
+    if host.startswith("www."):
+        host = host[4:]
+    if parts.scheme == "http" and host.endswith(":80"):
+        host = host[:-3]
+    elif parts.scheme == "https" and host.endswith(":443"):
+        host = host[:-4]
+    return host
+
 DAY = int(24 * 60 * 60 * 1e6)
 
 
@@ -132,6 +153,10 @@ class Places:
             (visit_count + 1, timestamp, typed, frecency, place_id),
         )
 
+        # Merge with the scheme-equivalent counterpart if it already exists,
+        # keeping https as the canonical entry.
+        self._do_merge_scheme_duplicate(conn, qurl)
+
     def merge_places(self, src_place_id, dest_place_id):
         "Merge src onto dest and delete src"
 
@@ -175,74 +200,116 @@ class Places:
         c.execute("DELETE FROM places WHERE id=?", (src_place_id,))
 
     def merge_https_places(self, http_qurl=None):
-        "Merge the specified http place into the corresponding https place, if available"
+        "Merge places into their scheme-equivalent counterparts. Canonical target is always the https version."
 
         def do_work(conn):
-            self._init_db_schema(conn)
+            if http_qurl is None:
+                # Bulk mode: inspect every place and merge http into https when both exist.
+                c = conn.cursor()
+
+                def place_id_for(url):
+                    try:
+                        return next(
+                            c.execute("SELECT id FROM places WHERE url=?", (url,))
+                        )[0]
+                    except StopIteration:
+                        pass
+
+                def counterpart(url):
+                    if url.startswith("http:"):
+                        return "https" + url[4:]
+                    if url.startswith("https:"):
+                        return "http" + url[5:]
+                    return None
+
+                for place_id, url in c.execute("SELECT id, url FROM places"):
+                    other_url = counterpart(url)
+                    if other_url is None:
+                        continue
+                    other_id = place_id_for(other_url)
+                    if other_id is None:
+                        continue
+                    # src = http (deleted), dest = https (kept)
+                    if url.startswith("http:"):
+                        self._do_merge_places(conn, place_id, other_id)
+            else:
+                # Targeted mode: merge a single URL's scheme counterpart if it exists.
+                self._do_merge_scheme_duplicate(conn, http_qurl)
+
+        Database.get(self.path).execute_and_wait(do_work)
+
+    def merge_redirected_urls(self, requested_qurl, final_qurl):
+        """Reconcile the places DB after a browser redirect.
+
+        Three cases are handled:
+        - Both URLs exist in DB: merge the requested into the final (final survives).
+        - Only the requested URL exists: rename it to the final URL (the user ended
+          up on the final URL, the requested was just the entry point).
+        - Only the final URL exists (or neither): nothing to do.
+
+        This is needed because Qt often fires acceptNavigationRequest only for the
+        originally-requested URL, so _do_visit records the http entry but never
+        creates the final https entry. Without this rename, the http entry would
+        remain in the DB forever and autocomplete would surface a stale URL.
+        """
+
+        def do_work(conn):
             c = conn.cursor()
 
             def place_id_for(url):
                 try:
-                    return next(c.execute("SELECT id FROM places WHERE url=?", (url,)))[
-                        0
-                    ]
+                    return next(c.execute("SELECT id FROM places WHERE url=?", (url,)))[0]
                 except StopIteration:
                     pass
 
-            pairs = {}
-            if http_qurl is None:
-                for place_id, url in c.execute("SELECT id, url FROM places"):
-                    if url.startswith("http:"):
-                        pairs[place_id] = "https" + url[4:]
-            else:
-                url = normalize(http_qurl.toString())
-                place_id = place_id_for(url)
-                if place_id is None:
-                    return
-                pairs[place_id] = "https" + url[4:]
-            mergers = {}
-            for place_id, surl in pairs.items():
-                splace_id = place_id_for(surl)
-                if splace_id is not None:
-                    mergers[place_id] = splace_id
-            for place_id, splace_id in mergers.items():
-                self._do_merge_places(conn, place_id, splace_id)
+            req_url = normalize(requested_qurl.toString())
+            fin_url = normalize(final_qurl.toString())
+            if req_url == fin_url:
+                return
+            req_id = place_id_for(req_url)
+            fin_id = place_id_for(fin_url)
+            if req_id is not None and fin_id is not None:
+                if req_id != fin_id:
+                    self._do_merge_places(conn, req_id, fin_id)
+            elif req_id is not None and fin_id is None:
+                # Only the requested URL is in DB. Rename it to the final URL.
+                # The url_lower trigger will update the lowercase column.
+                c.execute("UPDATE places SET url=? WHERE id=?", (fin_url, req_id))
 
         Database.get(self.path).execute_and_wait(do_work)
 
-    def transform_urls(self, transform_func=None):
-        if transform_func is None:
-            from .url_substitution import substitute as transform_func
+    def _do_merge_scheme_duplicate(self, conn, qurl):
+        "Merge the place for qurl into its exact scheme-equivalent counterpart if one exists. Must be called while the connection is held."
 
-        def do_work(conn):
-            self._init_db_schema(conn)
-            c = conn.cursor()
-            changes = {}
-            url_map = {}
-            for place_id, url in c.execute(
-                "SELECT id, url FROM places"
-            ):  # ← c.execute, inchangé
-                url_map[url] = place_id
-                changed, nurl = transform_func(url)
-                if changed:
-                    changes[place_id] = nurl
-            if changes:
-                merge, other = {}, {}
-                for place_id, nurl in changes.items():
-                    nplace_id = url_map.get(nurl)
-                    if nplace_id is None:
-                        other[place_id] = nurl
-                    else:
-                        merge[place_id] = nplace_id
-                if other:
-                    c.executemany(
-                        "UPDATE places SET url=? WHERE id=?",
-                        [(url, place_id) for place_id, url in other.items()],
-                    )
-                for src, dest in merge.items():
-                    self._do_merge_places(conn, src, dest)
+        def place_id_for(url):
+            try:
+                return next(conn.cursor().execute("SELECT id FROM places WHERE url=?", (url,)))[0]
+            except StopIteration:
+                pass
 
-        Database.get(self.path).execute_and_wait(do_work)
+        def counterpart(url):
+            if url.startswith("http:"):
+                return "https" + url[4:]
+            if url.startswith("https:"):
+                return "http" + url[5:]
+            return None
+
+        url = normalize(qurl.toString())
+        place_id = place_id_for(url)
+        if place_id is None:
+            return
+        other_url = counterpart(url)
+        if other_url is None:
+            return
+        other_id = place_id_for(other_url)
+        if other_id is None or other_id == place_id:
+            return
+        # Invariant: src = http (deleted), dest = https (kept).
+        if url.startswith("https:"):
+            src, dest = other_id, place_id
+        else:
+            src, dest = place_id, other_id
+        self._do_merge_places(conn, src, dest)
 
     def calculate_frecency(self, place_id, visit_count, cursor):
         "Algorithm taken from: https://developer.mozilla.org/en-US/docs/Mozilla/Tech/Places/Frecency_algorithm"
