@@ -2,7 +2,7 @@
 # vim:fileencoding=utf-8
 # License: GPL v3 Copyright: 2016, Kovid Goyal <kovid at kovidgoyal.net>
 
-from PyQt6.QtCore import QBuffer
+from PyQt6.QtCore import QBuffer, QByteArray
 from PyQt6.QtWebEngineCore import QWebEngineUrlSchemeHandler
 
 from .downloads import get_downloads_html, filename_icon_data
@@ -27,5 +27,13 @@ class UrlSchemeHandler(QWebEngineUrlSchemeHandler):
                 rq.reply(b'image/png', QBuffer(filename_icon_data(q), self))
             else:
                 rq.fail(rq.UrlNotFound)
+        elif q == 'client.js':
+            # vise:client.js → the concatenated bundle (built at runtime from
+            # the ES modules under vise/data/js/).
+            from .client_bundle import build_bundle
+            rq.reply(
+                b'text/javascript',
+                QBuffer(QByteArray(build_bundle().encode('utf-8')), self),
+            )
         else:
             rq.fail(rq.UrlNotFound)

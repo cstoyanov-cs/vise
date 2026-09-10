@@ -259,7 +259,9 @@ class Downloads(QObject):
 
 def get_downloads_html():
     if not hasattr(get_downloads_html, 'html'):
-        get_downloads_html.html = QByteArray(get_data('downloads.html').decode('utf-8').replace('_TITLE_', _('Downloads')).encode('utf-8'))
+        get_downloads_html.html = QByteArray(
+            get_data('downloads.html').decode('utf-8').replace('_TITLE_', _('Downloads')).encode('utf-8')
+        )
     return get_downloads_html.html
 
 

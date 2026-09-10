@@ -1,59 +1,20 @@
-const { JSDOM } = require('jsdom');
+// Ensure TextEncoder/TextDecoder are available globally before any other
+// module (notably whatwg-url / jsdom) tries to use them. Node 11+ has them
+// natively, but Jest's CommonJS environment may strip them.
 
-if (typeof TextEncoder === 'undefined') {
-    global.TextEncoder = require('util').TextEncoder;
+if (typeof globalThis.TextEncoder === 'undefined') {
+    globalThis.TextEncoder = require('util').TextEncoder;
 }
-if (typeof TextDecoder === 'undefined') {
-    global.TextDecoder = require('util').TextDecoder;
+if (typeof globalThis.TextDecoder === 'undefined') {
+    globalThis.TextDecoder = require('util').TextDecoder;
 }
 
-const dom = new JSDOM('<!DOCTYPE html><html><body></body></html>', {
-    url: 'http://localhost',
-    pretendToBeVisual: true,
-    runScripts: "dangerously",
-    beforeParse(window) {
-        window.history = { pushState: () => {}, replaceState: () => {}, go: () => {} };
-    }
-});
-
-global.window = dom.window;
-global.document = dom.window.document;
-global.navigator = dom.window.navigator;
-global.Node = dom.window.Node;
-global.Element = dom.window.Element;
-global.HTMLElement = dom.window.HTMLElement;
-global.NodeList = dom.window.NodeList;
-global.DOMTokenList = dom.window.DOMTokenList;
-global.getComputedStyle = dom.window.getComputedStyle;
-global.MutationObserver = dom.window.MutationObserver;
-global.DOMException = dom.window.DOMException;
-
-global.postMessage = jest.fn();
-global.addEventListener = jest.fn();
-global.removeEventListener = jest.fn();
-
-Object.defineProperty(global, 'crypto', {
-    value: {
-        getRandomValues: (arr) => {
-            for (let i = 0; i < arr.length; i++) {
-                arr[i] = Math.floor(Math.random() * 256);
-            }
-            return arr;
-        },
-        subtle: {
-            encrypt: jest.fn(),
-            decrypt: jest.fn(),
-            digest: jest.fn(),
-            importKey: jest.fn(),
-            exportKey: jest.fn(),
-        },
-    },
-    writable: true,
-});
-
-global.console = {
-    ...console,
-    error: jest.fn(),
-    log: jest.fn(),
-    warn: jest.fn(),
-};
+if (typeof postMessage !== 'function') {
+    globalThis.postMessage = () => {};
+}
+if (typeof addEventListener !== 'function') {
+    globalThis.addEventListener = () => {};
+}
+if (typeof removeEventListener !== 'function') {
+    globalThis.removeEventListener = () => {};
+}

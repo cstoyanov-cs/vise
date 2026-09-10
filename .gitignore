@@ -1,9 +1,6 @@
 # Build artifacts
 file::memory:*
 tags
-*.pyj-cached
-.build-cache
-# vise/data/vise-client.js is committed (built by `sh build`, required at runtime)
 __pycache__
 
 # Python packaging (hatchling + uv)
@@ -36,3 +33,8 @@ MagicMock
 .idea/
 .vscode/
 .DS_Store
+
+# JavaScript client tests (Jest + jsdom)
+tests/js/node_modules/
+tests/js/coverage/
+tests/js/.babel-cache/

@@ -70,26 +70,10 @@ uv tool install .
 vise
 ```
 
-### Build the client side JavaScript
+### Client JavaScript
 
-The embedded web UI is written in RapydScript and must be compiled before the
-first run. RapydScript-NG is a JavaScript tool shipped with a `setup.py`
-shim, so it can be installed as a user-level Python script:
-
-```bash
-# system-wide or user-level, do NOT put it in the project venv
-pip install --user 'git+https://github.com/kovidgoyal/rapydscript-ng'
-
-# verify the binary is on PATH
-command -v rapydscript
-
-# build the client bundle
-sh build    # produces vise/data/vise-client.js (inside the package)
-```
-
-> RapydScript-NG has no `pyproject.toml`, so it is intentionally NOT listed
-> under `[project.optional-dependencies]` — uv/pip would refuse to build it
-> inside an isolated project venv. Keep it outside the project.
+The embedded web UI is plain ES modules under `vise/data/js/` — **no build
+step**. The browser loads `main.js` directly via `<script type="module">`.
 
 
 Development
@@ -99,10 +83,12 @@ Development
 git clone https://github.com/<user>/vise
 cd vise
 uv sync --extra dev
-uv run pytest          # run the test suite
+uv run pytest          # run Python tests
 uv run ruff check      # lint
 uv run ruff format     # auto-format
-sh build               # rebuild client JS
+
+# JavaScript client tests (Jest + jsdom)
+cd tests/js && npx jest
 ```
 
 The project uses [hatchling](https://hatch.pypa.io/) as build backend and

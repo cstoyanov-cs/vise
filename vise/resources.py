@@ -5,7 +5,12 @@
 import os
 from functools import lru_cache
 
-from PyQt6.QtGui import QIcon
+# PyQt6 import is deferred so modules that only need ``get_data_as_path`` or
+# ``get_data`` (e.g. the JS bundler) don't pull in libGL at import time.
+try:
+    from PyQt6.QtGui import QIcon
+except ImportError:
+    QIcon = None  # type: ignore[assignment]
 
 
 def get_data_as_path(name):
@@ -23,6 +28,9 @@ def get_data(name):
 
 @lru_cache(maxsize=512)
 def get_icon(name):
+    if QIcon is None:
+        from PyQt6.QtGui import QIcon as _QIcon
+        globals()['QIcon'] = _QIcon
     if not name.startswith('images/'):
         name = 'images/' + name
     return QIcon(get_data_as_path(name))

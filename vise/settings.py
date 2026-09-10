@@ -19,8 +19,7 @@ from PyQt6.QtWebEngineCore import (
 from PyQt6.QtWidgets import QApplication
 
 from .config import color, font_sizes
-from .constants import DOWNLOADS_URL, VISE_SCHEME, appname, cache_dir, config_dir
-from .resources import get_data_as_file
+from .constants import VISE_SCHEME, appname, cache_dir, config_dir
 from .database import Database
 
 
@@ -177,25 +176,58 @@ def create_script(
 
 
 TITLE_TOKEN = None
+SECRET_KEY = None
+
+
+def _ensure_runtime_secrets():
+    """Initialize TITLE_TOKEN and SECRET_KEY lazily, once per process."""
+    global TITLE_TOKEN, SECRET_KEY
+    if TITLE_TOKEN is None:
+        TITLE_TOKEN = hexlify(os.urandom(32)).decode("ascii")
+    if SECRET_KEY is None:
+        SECRET_KEY = hexlify(os.urandom(32)).decode("ascii")
+
+
+@lru_cache()
+def client_config_json():
+    """JSON payload for the ``__VISE_CONFIG__`` global consumed by
+    ``vise/data/js/config.js``. Cached because the values are stable for the
+    lifetime of the process.
+    """
+    _ensure_runtime_secrets()
+    return json.dumps({
+        "titleToken": TITLE_TOKEN,
+        "secretKey": SECRET_KEY,
+        "hintFontSize": str(font_sizes().get("hint-size")),
+        "hintForeground": color("hint foreground", "black"),
+        "hintBackground": color("hint background", "khaki"),
+        "selectedHintBackground": color("selected hint background", "khaki"),
+    })
+
+
+# Inline bootstrap injected into every page. It sets the config global then
+# dynamically loads the main ES module from the vise: scheme.
+# Inline bootstrap injected into every page: sets the config global then
+# runs the concatenated client bundle. The bundle reads runtime values from
+# the global instead of having placeholders substituted at build time.
+_BOOTSTRAP_TEMPLATE = (
+    "globalThis.__VISE_CONFIG__ = {config_json};\n"
+    "{bundle}"
+)
 
 
 @lru_cache()
 def client_script():
-    global TITLE_TOKEN
-    TITLE_TOKEN = hexlify(os.urandom(32)).decode("ascii")
-    name = "%s-client.js" % appname
-    f = get_data_as_file(name)
-    src = f.read().decode("utf-8")
-    src = src.replace("__DOWNLOADS_URL__", DOWNLOADS_URL)
-    src = src.replace("HINT_FONT_SIZE", str(font_sizes().get("hint-size")))
-    src = src.replace(
-        "SELECTED_HINT_BACKGROUND", color("selected hint background", "khaki")
+    """QWebEngineScript that injects the vise client into every page."""
+    _ensure_runtime_secrets()
+    # Late import keeps the bundler usable in environments where QtWebEngine
+    # is not available (e.g. CI tests).
+    from .client_bundle import build_bundle
+    src = _BOOTSTRAP_TEMPLATE.format(
+        config_json=client_config_json(),
+        bundle=build_bundle(),
     )
-    src = src.replace("HINT_FOREGROUND", color("hint foreground", "black"))
-    src = src.replace("HINT_BACKGROUND", color("hint background", "khaki"))
-    src = src.replace("__TITLE_TOKEN__", TITLE_TOKEN)
-    src = src.replace("__SECRET_KEY__", hexlify(os.urandom(32)).decode("ascii"))
-    return create_script(f.name, src)
+    return create_script(f"{appname}-client", src)
 
 
 def insert_scripts(profile, *scripts):
@@ -249,14 +281,7 @@ def create_profile(parent=None, private=False):
     ua = " ".join(x for x in ans.httpUserAgent().split() if "QtWebEngine" not in x)
     ans.setHttpUserAgent(ua)
     ans.setUrlRequestInterceptor(Interceptor(ans))
-    try:
-        insert_scripts(ans, client_script())
-    except FileNotFoundError as err:
-        if "-client.js" in str(err):
-            raise SystemExit(
-                "You need to compile the rapydscript parts of vise before running it. Install rapydscript-ng and run the build script"
-            )
-        raise
+    insert_scripts(ans, client_script())
     ans.url_handler = UrlSchemeHandler(ans)
     ans.installUrlSchemeHandler(VISE_SCHEME.encode("ascii"), ans.url_handler)
     # We need accept language to bypass cloudflare's stupid bot protection

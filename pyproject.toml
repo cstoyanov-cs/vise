@@ -30,9 +30,9 @@ dev = [
   "ruff>=0.6",
   "pre-commit>=4",
 ]
-# Note: rapydscript-ng is a JS-based build tool, NOT a Python package,
-# so it cannot live in [project.optional-dependencies]. Install it
-# separately — see README "Building the client JavaScript".
+# The client JavaScript lives in vise/data/js/ as native ES modules — no
+# build step. The HTML pages (welcome, downloads) and the bootstrap
+# injected into every page load the entry point main.js directly.
 
 [project.scripts]
 vise = "vise.main:main"
@@ -48,9 +48,6 @@ build-backend = "hatchling.build"
 packages = ["vise"]
 exclude = [
   "tests*",
-  "client*",
-  "*.pyj",
-  ".build-cache*",
   "=template.py",
   "build",
   ".coverage",
@@ -63,8 +60,6 @@ dependencies = ["pytest", "pytest-cov", "ruff"]
 test = "pytest {args:tests/unit}"
 lint = "ruff check {args:.}"
 format = "ruff format {args:.}"
-build-js = "sh build"
-
 # ── pytest ─────────────────────────────────────────────────────────────
 [tool.pytest.ini_options]
 testpaths = ["tests/unit"]
