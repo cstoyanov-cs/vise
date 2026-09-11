@@ -277,6 +277,8 @@ class WebView(QWebEngineView):
         self.callback_on_save_edit_text_node = None
         self._dev_tools = None
         self._pending_anchor = False
+        self._pending_find_text_callback = None
+        self._page.findTextFinished.connect(self._on_find_text_finished)
 
     @property
     def muted(self):
@@ -730,17 +732,26 @@ class WebView(QWebEngineView):
             if forward
             else QWebEnginePage.FindFlag.FindBackward
         )
-        self.find_text_data = [text, callback]
         if callback is None:
             self._page.findText(text, flags)
-        else:
-            self._page.findText(text, flags, self._find_text_intermediate)
+            return
+        # Qt's findText(text, flags, cb) callback is unreliable: in
+        # practice cb(found) is invoked with found=True even when the
+        # page has zero matches (see tools/debug_search.py). Read the
+        # truth from findTextFinished.numberOfMatches() instead.
+        # Chromium cancels any in-flight find when a new findText()
+        # starts, so only the latest search's findTextFinished ever
+        # fires - no race, no generation counter needed.
+        self._pending_find_text_callback = (text, callback)
+        self._page.findText(text, flags)
 
-    def _find_text_intermediate(self, found):
-        text, callback = self.find_text_data
-        self.find_text_data = [None, None]
-        if callback is not None:
-            callback(text, found)
+    def _on_find_text_finished(self, result):
+        pending = self._pending_find_text_callback
+        if pending is None:
+            return
+        self._pending_find_text_callback = None
+        text, callback = pending
+        callback(text, result.numberOfMatches() > 0)
 
     def serialize_state(self, include_favicon=False):
         x, y = self.scroll_position
