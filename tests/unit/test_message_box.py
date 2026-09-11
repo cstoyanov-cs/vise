@@ -3,13 +3,6 @@ import sys
 from unittest.mock import MagicMock
 
 
-@pytest.fixture(autouse=True)
-def mock_qt_modules(mocker):
-    for name in ["PyQt6", "PyQt6.QtCore", "PyQt6.QtGui", "PyQt6.QtWidgets",
-                 "PyQt6.QtWebEngineCore", "PyQt6.QtWebEngineWidgets"]:
-        sys.modules[name] = MagicMock()
-    return sys.modules
-
 
 @pytest.fixture
 def mock_vise_modules(mocker):
@@ -25,7 +18,7 @@ def mock_vise_modules(mocker):
 
 
 class TestWarningDialog:
-    def test_warning_dialog_returns_dialog(self, mock_qt_modules, mock_vise_modules, mocker):
+    def test_warning_dialog_returns_dialog(self, mock_vise_modules, mocker):
         from vise.message_box import warning_dialog
 
         mocker.patch("vise.message_box.MessageBox")
@@ -35,7 +28,7 @@ class TestWarningDialog:
 
         assert result is not None
 
-    def test_warning_dialog_calls_exec_when_show_true(self, mock_qt_modules, mock_vise_modules, mocker):
+    def test_warning_dialog_calls_exec_when_show_true(self, mock_vise_modules, mocker):
         from vise.message_box import warning_dialog
 
         mock_instance = MagicMock()
@@ -48,7 +41,7 @@ class TestWarningDialog:
 
 
 class TestErrorDialog:
-    def test_error_dialog_returns_dialog(self, mock_qt_modules, mock_vise_modules, mocker):
+    def test_error_dialog_returns_dialog(self, mock_vise_modules, mocker):
         from vise.message_box import error_dialog
 
         mocker.patch("vise.message_box.MessageBox")
@@ -58,7 +51,7 @@ class TestErrorDialog:
 
         assert result is not None
 
-    def test_error_dialog_calls_exec_when_show_true(self, mock_qt_modules, mock_vise_modules, mocker):
+    def test_error_dialog_calls_exec_when_show_true(self, mock_vise_modules, mocker):
         from vise.message_box import error_dialog
 
         mock_instance = MagicMock()
@@ -71,7 +64,7 @@ class TestErrorDialog:
 
 
 class TestQuestionDialog:
-    def test_question_dialog_auto_skip(self, mock_qt_modules, mock_vise_modules, mocker):
+    def test_question_dialog_auto_skip(self, mock_vise_modules, mocker):
         from vise.message_box import question_dialog
 
         mocker.patch("vise.message_box.gprefs", new_callable=lambda: MagicMock(

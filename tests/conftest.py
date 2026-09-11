@@ -1,6 +1,18 @@
+import importlib.util
 import sys
+import types
 from unittest.mock import MagicMock
 import pytest
+
+
+
+class _PyQt6Module(types.ModuleType):
+    """PyQt6 module that auto-stubs any missing attribute (e.g. sip)."""
+
+    def __getattr__(self, name):
+        m = MagicMock(name=name)
+        super().__setattr__(name, m)
+        return m
 
 
 class MockQtKeyClass:
@@ -142,7 +154,12 @@ def pytest_configure(config):
     """
     import types
 
-    if "yaml" not in sys.modules:
+    # ``yaml`` is a hard dependency in pyproject.toml and is normally
+    # installed; the stub below only kicks in if a test environment is
+    # running without it (e.g. a slim CI image). Importing it via
+    # ``importlib.util.find_spec`` avoids racing against an actual user
+    # import.
+    if importlib.util.find_spec("yaml") is None and "yaml" not in sys.modules:
         _yaml = types.ModuleType("yaml")
 
         def _fake_safe_load(stream):
@@ -161,7 +178,12 @@ def pytest_configure(config):
 
         _yaml.safe_load = _fake_safe_load
         sys.modules["yaml"] = _yaml
-    if "apsw" not in sys.modules:
+
+    # Same logic for apsw: only stub when it really isn't installed.
+    # The previous ``"apsw" not in sys.modules`` check ran before any test
+    # import happened, so it was true even when apsw was on disk — and the
+    # stub silently masked the real module. find_spec asks the loader.
+    if importlib.util.find_spec("apsw") is None and "apsw" not in sys.modules:
         _apsw = types.ModuleType("apsw")
         _apsw.Connection = MagicMock()
         _apsw.SQLITE_OPEN_READWRITE = 0
@@ -175,14 +197,6 @@ def pytest_configure(config):
     # resolves PyQt6.QtCore via attribute lookup and finds the mocked
     # submodule. A MagicMock here would return its own child mocks for
     # submodule access and bypass our carefully-crafted QtMockModule.
-    class _PyQt6Module(types.ModuleType):
-        """PyQt6 module that auto-stubs any missing attribute (e.g. sip)."""
-
-        def __getattr__(self, name):
-            m = MagicMock(name=name)
-            super().__setattr__(name, m)
-            return m
-
     pyqt6 = _PyQt6Module("PyQt6")
     sys.modules["PyQt6"] = pyqt6
     pyqt6.QtCore = QtMockModule()
@@ -237,3 +251,136 @@ def mock_qapp(mocker):
     mocker.patch("PyQt6.QtWidgets.QApplication.instance", return_value=mock_app)
     mocker.patch("PyQt6.QtWidgets.QApplication", return_value=mock_app)
     return mock_app
+
+
+# ---------------------------------------------------------------------------
+# ``mocker`` fixture (pure-stdlib replacement for pytest-mock).
+# ---------------------------------------------------------------------------
+#
+# The project declares ``pytest-mock`` as a dev dependency in pyproject.toml
+# but the local .venv has a broken Python symlink (points to a path that
+# no longer exists) and the system Python doesn't have it either. To keep
+# the test suite runnable in *any* environment — including CI containers
+# that don't install pytest-mock — we ship a minimal in-process shim that
+# exposes just the surface the suite actually uses: ``patch``,
+# ``patch.object`` and ``patch.dict``. The shim is implemented on top of
+# ``unittest.mock`` so behaviour is identical to ``pytest-mock``'s wrapper.
+#
+# If pytest-mock *is* installed later, pytest auto-discovers its real
+# ``mocker`` fixture and the shim below is silently shadowed by it
+# (fixture lookup order: conftest plugins → installed plugins).
+#
+# API parity check (only what the suite calls — see tests/ for usage):
+#   mocker.patch(target, **kwargs)            -> unittest.mock.patch
+#   mocker.patch.object(target, attr, **kws)  -> unittest.mock.patch.object
+#   mocker.patch.dict(dict_obj, values, ...)  -> unittest.mock.patch.dict
+#   mocker.stopall()                          -> undo all active patches
+
+
+# Module-level sentinel for the optional ``new`` argument of patch().
+_MOCKER_NO_NEW = object()
+
+
+class _MockerPatcher:
+    """Callable that mocks ``pytest-mock``'s ``_Patcher`` exactly.
+
+    Acts as both ``mocker.patch(...)`` (callable) and exposes ``.object`` /
+    ``.dict`` methods that mirror ``unittest.mock.patch.{object,dict}``.
+    Bound to a parent ``_Mocker`` so ``stopall`` can undo every patch.
+    """
+
+    def __init__(self, owner):
+        object.__setattr__(self, "_owner", owner)
+
+    def __call__(self, target, new=_MOCKER_NO_NEW, **kwargs):
+        """``mocker.patch(target, new=DEFAULT, **kwargs)`` → started mock."""
+        um = __import__("unittest.mock", fromlist=["patch"])
+        if new is _MOCKER_NO_NEW:
+            p = um.patch(target, **kwargs)
+        else:
+            p = um.patch(target, new, **kwargs)
+        self._owner._patches.append(p)
+        return p.start()
+
+    def object(self, target, attribute, new=_MOCKER_NO_NEW, **kwargs):
+        """``mocker.patch.object(target, attr, new=DEFAULT, **kwargs)``."""
+        um = __import__("unittest.mock", fromlist=["patch"])
+        if new is _MOCKER_NO_NEW:
+            p = um.patch.object(target, attribute, **kwargs)
+        else:
+            p = um.patch.object(target, attribute, new, **kwargs)
+        self._owner._patches.append(p)
+        return p.start()
+
+    def dict(self, in_dict, values=(), clear=False, **kwargs):
+        """``mocker.patch.dict(in_dict, values=(), clear=False, **kwargs)``."""
+        um = __import__("unittest.mock", fromlist=["patch"])
+        p = um.patch.dict(in_dict, values, clear=clear, **kwargs)
+        self._owner._patches.append(p)
+        return p.start()
+
+    # Aliases used by some call sites.
+    @property
+    def multi(self):
+        raise NotImplementedError("mocker.patch.multi is not in the shim surface")
+
+
+class _Mocker:
+    """Thin wrapper around ``unittest.mock.patch`` mimicking pytest-mock's API."""
+
+    def __init__(self):
+        self._patches = []
+        # patch is an *instance attribute*, not a method — that lets callers
+        # do ``mocker.patch.object(...)`` and ``mocker.patch.dict(...)``
+        # exactly like pytest-mock.
+        self.patch = _MockerPatcher(self)
+
+    def stopall(self):
+        """Stop every patch started by this fixture, in reverse order."""
+        while self._patches:
+            self._patches.pop().stop()
+
+
+@pytest.fixture
+def mocker():
+    """Drop-in replacement for pytest-mock's ``mocker`` fixture.
+
+    Uses only ``unittest.mock``. If pytest-mock is installed later this
+    fixture is shadowed by the upstream one and behaviour is unchanged.
+    """
+    m = _Mocker()
+    yield m
+    m.stopall()
+
+
+@pytest.fixture(autouse=True)
+def restore_pyqt_mocks():
+    """Re-establish the PyQt6 mock stubs before each test.
+
+    Several test files define their own ``autouse`` fixture that
+    overwrites ``sys.modules["PyQt6.*"]`` with raw MagicMock instances.
+    Once that fixture finishes, the clobbered state leaks into the next
+    test, which is why the modular client tests (which depend on the
+    carefully-crafted ``_RealQWebEngineUrlSchemeHandler`` in this
+    conftest) fail when run after a Qt-clobbering test. This fixture
+    re-applies the carefully crafted stubs at the start of every test.
+
+    Detection: MagicMock auto-vivifies attribute access so
+    ``hasattr(m, "_vise_pyqt_stub")`` lies for any ``MagicMock`` instance.
+    The reliable signal is ``isinstance(pyqt6, _PyQt6Module)``.
+    """
+    pyqt6 = sys.modules.get("PyQt6")
+    if not isinstance(pyqt6, _PyQt6Module):
+        pyqt6 = _PyQt6Module("PyQt6")
+        pyqt6.QtCore = QtMockModule()
+        pyqt6.QtGui = QtGuiMockModule()
+        pyqt6.QtWidgets = QtWidgetsMockModule()
+        pyqt6.QtWebEngineCore = QtWebEngineMockModule()
+        pyqt6.QtWebEngineWidgets = QtWebEngineMockModule()
+        sys.modules["PyQt6"] = pyqt6
+        sys.modules["PyQt6.QtCore"] = pyqt6.QtCore
+        sys.modules["PyQt6.QtGui"] = pyqt6.QtGui
+        sys.modules["PyQt6.QtWidgets"] = pyqt6.QtWidgets
+        sys.modules["PyQt6.QtWebEngineCore"] = pyqt6.QtWebEngineCore
+        sys.modules["PyQt6.QtWebEngineWidgets"] = pyqt6.QtWebEngineWidgets
+    yield

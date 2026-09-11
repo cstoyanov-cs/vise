@@ -18,13 +18,13 @@ def mock_qt_modules(mocker):
 
 
 class TestPythonToJs:
-    def test_python_to_js_function_exists(self, mock_qt_modules):
+    def test_python_to_js_function_exists(self):
         from vise.communicate import python_to_js
         assert callable(python_to_js)
 
 
 class TestJsToPython:
-    def test_js_to_python_unknown_signal(self, mock_qt_modules, mocker, capsys):
+    def test_js_to_python_unknown_signal(self, mocker, capsys):
         from vise.communicate import js_to_python
 
         mock_page = MagicMock()
@@ -38,7 +38,7 @@ class TestJsToPython:
 
 
 class TestConnectSignal:
-    def test_connect_signal_raises_duplicate(self, mock_qt_modules, mocker):
+    def test_connect_signal_raises_duplicate(self, mocker):
         from vise.communicate import connect_signal
 
         @connect_signal("test_signal")

@@ -185,9 +185,55 @@ class TestGcmOutputShape:
         assert result["cipherbytes_len"] == len("shape check".encode("utf-8"))
 
 
-# ---------------------------------------------------------------------------
-# IV behaviour — random_iv=True must produce different IVs per encrypt
-# ---------------------------------------------------------------------------
+    def test_tag_is_typed_uint32array_of_length_4(self):
+        """The ``tag`` field MUST be a real ``Uint32Array`` (not a plain
+        ``Array``), and exactly 4 elements long (== 16 bytes BE).
+
+        crypto.js depends on this exact type to flatten it via:
+            new Uint32Array(buf).set(tagU32);
+        (see vise/data/js/crypto.js tagToBytes). If the rewrite accidentally
+        drops the typed array or changes its element type, frames.js receives
+        corrupted bytes and decryption on the receiving side will fail.
+        """
+        driver = textwrap.dedent(r"""
+            import { GCM } from './aes.js';
+
+            function hexToBytes(hex) {
+                const out = new Uint8Array(hex.length / 2);
+                for (let i = 0, j = 0; i < hex.length; i += 2, j++) {
+                    out[j] = parseInt(hex.substring(i, i + 2), 16);
+                }
+                return out;
+            }
+
+            const gcm = new GCM(hexToBytes('a0'.repeat(32)), true);
+            const r = gcm.encrypt('hi');
+            process.stdout.write(JSON.stringify({
+                is_typed: r.tag instanceof Uint32Array,
+                is_array: r.tag instanceof Array,
+                constructor_name: r.tag.constructor && r.tag.constructor.name,
+                length: r.tag.length,
+                byte_length: r.tag.byteLength,
+            }));
+        """)
+        proc = subprocess.run(
+            ["node", "--input-type=module", "-"],
+            input=driver, capture_output=True, text=True, cwd=str(JS_DIR),
+        )
+        assert proc.returncode == 0, f"aes.js crashed: {proc.stderr}"
+        out = json.loads(proc.stdout)
+        assert out["is_typed"] is True, (
+            f'tag must be Uint32Array, got constructor={out["constructor_name"]!r}. '
+            f'crypto.js tagToBytes() depends on this exact type.'
+        )
+        assert out["is_array"] is False, (
+            "tag must NOT be a plain Array. "
+            "This is a regression of the rapydscript-to-pure-JS port."
+        )
+        assert out["length"] == 4, f'tag length must be 4, got {out["length"]}'
+        assert out["byte_length"] == 16, (
+            f'tag byteLength must be 16 (4 * 4 bytes/elem), got {out["byte_length"]}'
+        )
 
 class TestGcmIv:
     def test_two_encrypts_of_same_plaintext_differ(self):

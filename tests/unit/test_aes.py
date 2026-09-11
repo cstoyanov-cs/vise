@@ -109,23 +109,48 @@ class TestAesExports:
         )
 
 
+
 # ---------------------------------------------------------------------------
-# Known-answer tests — NIST SP 800-38A F.1.5 (AES-256-ECB)
+# Known-answer tests — NIST SP 800-38A Appendix F (AES-128/192/256 ECB)
 # ---------------------------------------------------------------------------
 #
 # These vectors are public domain (NIST). We use them to verify the AES
 # block cipher implementation is correct *independently* of GCM. A failure
 # here means the underlying AES is broken — GCM will not save it.
+#
+# Coverage of all three key sizes (128/192/256) protects the key schedule
+# from regressions on the KC != 8 branch of the original Python source.
 
-NIST_AES256_KEY_HEX = (
-    "603deb1015ca71be2b73aef0857d7781"
-    "1f352c073b6108d72d9810a30914dff4"
-)
-NIST_AES256_PLAINTEXT_HEX = "6bc1bee22e409f96e93d7e117393172a"
-NIST_AES256_CIPHERTEXT_HEX = "f3eed1bdb5d2a03c064b5a7e3db181f8"
+import pytest
+
+NIST_VECTORS = [
+    pytest.param(
+        # F.1.1 AES-128
+        "2b7e151628aed2a6abf7158809cf4f3c",
+        "6bc1bee22e409f96e93d7e117393172a",
+        "3ad77bb40d7a3660a89ecaf32466ef97",
+        id="aes128",
+    ),
+    pytest.param(
+        # F.1.3 AES-192
+        "8e73b0f7da0e6452c810f32b809079e562f8ead2522c6b7b",
+        "6bc1bee22e409f96e93d7e117393172a",
+        "bd334f1d6e45f25ff712a214571fa5cc",
+        id="aes192",
+    ),
+    pytest.param(
+        # F.1.5 AES-256
+        "603deb1015ca71be2b73aef0857d7781"
+        "1f352c073b6108d72d9810a30914dff4",
+        "6bc1bee22e409f96e93d7e117393172a",
+        "f3eed1bdb5d2a03c064b5a7e3db181f8",
+        id="aes256",
+    ),
+]
 
 
-def _run_nist_vector() -> str:
+def _run_nist_vector(key_hex: str, pt_hex: str) -> str:
+    """Spawn Node, run AES.encrypt once, return hex of the output buffer."""
     driver = textwrap.dedent(r"""
         import { AES } from './aes.js';
 
@@ -148,7 +173,7 @@ def _run_nist_vector() -> str:
         let hex = '';
         for (const b of ct) hex += b.toString(16).padStart(2, '0');
         process.stdout.write(hex);
-    """) % (NIST_AES256_KEY_HEX, NIST_AES256_PLAINTEXT_HEX)
+    """) % (key_hex, pt_hex)
 
     proc = subprocess.run(
         ["node", "--input-type=module", "-"],
@@ -162,16 +187,19 @@ def _run_nist_vector() -> str:
 
 
 class TestAesKnownVectors:
-    def test_aes256_ecb_matches_nist_vector(self):
-        """AES-256-ECB one-block encryption must match NIST SP 800-38A F.1.5.
+    @pytest.mark.parametrize("key_hex,pt_hex,expected_hex", NIST_VECTORS)
+    def test_aes_ecb_matches_nist_vector(self, key_hex, pt_hex, expected_hex):
+        """AES-ECB one-block encryption must match NIST SP 800-38A Appendix F.
 
-        Independent of GCM: this validates the block cipher itself. If this
-        passes and GCM roundtrip also passes, the module is correct.
+        Parametrized over the three valid key sizes (128/192/256 bits).
+        A failure here indicates a bug in the key schedule (KC != 8 branch),
+        the S-box lookup, or the round transformation. Do NOT ship until
+        this passes for all three sizes.
         """
-        actual = _run_nist_vector()
-        assert actual == NIST_AES256_CIPHERTEXT_HEX, (
-            f"AES-256-ECB mismatch.\n"
-            f"  expected: {NIST_AES256_CIPHERTEXT_HEX}\n"
+        actual = _run_nist_vector(key_hex, pt_hex)
+        assert actual == expected_hex, (
+            f"AES-ECB mismatch.\n"
+            f"  expected: {expected_hex}\n"
             f"  actual:   {actual}\n"
             f"This indicates a bug in the AES key schedule, S-box lookup, or "
             f"round transformation. Do NOT ship until this passes."

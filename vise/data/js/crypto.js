@@ -1,19 +1,13 @@
 // AES-GCM encryption/decryption, used by frames.js for inter-frame messaging.
 //
-// Source of truth (history):
-//   - Pre-rapydscript: client/crypto.pyj, which used the rapydscript stdlib
-//     ``aes`` module. That implementation was pure JS, worked in every
-//     browser context, and required no WebCrypto.
-//   - Interim: switched to ``crypto.subtle.importKey`` (WebCrypto). That
-//     path only works in secure contexts (HTTPS / localhost), which broke
-//     userscript injection on plain-HTTP pages — ``crypto.subtle`` is
-//     ``undefined`` outside secure contexts and ``importKey`` threw
-//     ``TypeError: Cannot read properties of undefined``.
+// History: an earlier version of this module used ``crypto.subtle.importKey``
+// (WebCrypto). That path only works in secure contexts (HTTPS / localhost),
+// which broke userscript injection on plain-HTTP pages — ``crypto.subtle`` is
+// ``undefined`` outside secure contexts and ``importKey`` threw
+// ``TypeError: Cannot read properties of undefined``.
 //
-// This module restores the rapydscript-era pure-JS implementation via the
-// extracted ``aes.js`` module (which carries the legacy ``aes.pyj`` code
-// verbatim, with a small rapydscript runtime shim). It works in any
-// browser context, secure or not.
+// This module now delegates to ``aes.js``, a pure-JS AES-GCM implementation
+// with no WebCrypto dependency. Works in any browser context (secure or not).
 //
 // Public API (kept compatible with the WebCrypto version so frames.js and
 // other callers don't need to change):

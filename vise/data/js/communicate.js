@@ -5,7 +5,6 @@
 // incoming messages. Outgoing messages are queued and surfaced to Python via
 // window.get_messages_from_javascript, which Python polls from a QTimer.
 //
-// Source of truth: client/communicate.pyj (rapydscript).
 
 const cfg_com = (typeof globalThis !== 'undefined' && globalThis.__VISE_CONFIG__) || {};
 const TITLE_TOKEN = cfg_com.titleToken || '';

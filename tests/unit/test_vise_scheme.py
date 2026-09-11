@@ -1,21 +1,17 @@
-import pytest
-import sys
-from unittest.mock import MagicMock
+"""Smoke tests for vise.vise_scheme.
 
-
-@pytest.fixture(autouse=True)
-def mock_qt_modules(mocker):
-    for name in ["PyQt6", "PyQt6.QtCore", "PyQt6.QtGui", "PyQt6.QtWidgets",
-                 "PyQt6.QtWebEngineCore", "PyQt6.QtWebEngineWidgets"]:
-        sys.modules[name] = MagicMock()
-    return sys.modules
+PyQt6 / yaml / apsw stubs come from tests/conftest.py — no local mocking
+needed. (This file used to redefine ``mock_qt_modules`` which silently
+clobbered the conftest's carefully-crafted Qt mock, leaking MagicMocks
+into later tests that depended on the real QBuffer / QByteArray.)
+"""
+from vise import vise_scheme
+from vise.vise_scheme import UrlSchemeHandler
 
 
 class TestViseScheme:
-    def test_vise_scheme_module_imports(self, mock_qt_modules):
-        from vise import vise_scheme
+    def test_vise_scheme_module_imports(self):
         assert vise_scheme is not None
 
-    def test_url_scheme_handler_class_exists(self, mock_qt_modules):
-        from vise.vise_scheme import UrlSchemeHandler
+    def test_url_scheme_handler_class_exists(self):
         assert UrlSchemeHandler is not None

@@ -69,24 +69,24 @@ def mock_vise_modules(mocker):
 class TestSitePermissionsSurface:
     """Smoke tests: the public API is importable and has the expected shape."""
 
-    def test_permissions_class_exists(self, mock_qt_modules, mock_vise_modules):
+    def test_permissions_class_exists(self, mock_vise_modules):
         from vise.site_permissions import Permissions
         assert Permissions is not None
 
     def test_site_permissions_module_instance_exists(
-        self, mock_qt_modules, mock_vise_modules
+        self, mock_vise_modules
     ):
         from vise.site_permissions import site_permissions
         assert site_permissions is not None
 
     def test_permissions_has_has_permission_method(
-        self, mock_qt_modules, mock_vise_modules
+        self, mock_vise_modules
     ):
         from vise.site_permissions import Permissions
         assert hasattr(Permissions, "has_permission")
 
     def test_permissions_has_add_permission_method(
-        self, mock_qt_modules, mock_vise_modules
+        self, mock_vise_modules
     ):
         from vise.site_permissions import Permissions
         assert hasattr(Permissions, "add_permission")
@@ -102,7 +102,7 @@ class TestSitePermissionsBehaviour:
     """
 
     def test_temporary_add_permission_stores_in_memory(
-        self, mock_qt_modules, mock_vise_modules
+        self, mock_vise_modules
     ):
         """add_permission(permanent=False) must NOT touch the database;
         it stores the grant in self.temporary[domain] for the lifetime
@@ -115,7 +115,7 @@ class TestSitePermissionsBehaviour:
         assert "notifications" in p.temporary["example.com"]
 
     def test_has_permission_returns_true_for_temporary_grant(
-        self, mock_qt_modules, mock_vise_modules
+        self, mock_vise_modules
     ):
         """A temporary grant must be honoured by has_permission without
         consulting the database. We patch Database.get so any call to
@@ -134,7 +134,7 @@ class TestSitePermissionsBehaviour:
         database_module.Database.get.assert_not_called()
 
     def test_has_permission_with_unknown_domain_returns_false(
-        self, mock_qt_modules, mock_vise_modules, mocker
+        self, mock_vise_modules, mocker
     ):
         """For a domain that has no grant at all, has_permission must
         return False without raising. We patch Database.get to return
@@ -155,7 +155,7 @@ class TestSitePermissionsBehaviour:
         assert p.has_permission("unknown.example", "notifications") is False
 
     def test_init_sets_path_from_config_dir(
-        self, mock_qt_modules, mock_vise_modules
+        self, mock_vise_modules
     ):
         """Permissions.__init__ derives the SQLite path from config_dir
         (a constant in vise.constants). When config_dir is patched to
@@ -166,7 +166,7 @@ class TestSitePermissionsBehaviour:
         assert p.path == "/tmp/config/site-permissions.sqlite"
 
     def test_init_creates_temporary_defaultdict(
-        self, mock_qt_modules, mock_vise_modules
+        self, mock_vise_modules
     ):
         """self.temporary must be a defaultdict so that
         `p.temporary[unknown_domain]` returns an empty set instead of
