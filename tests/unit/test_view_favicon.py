@@ -74,6 +74,10 @@ def _install_qt_for_view(tmp_path):
     qt_webengine_core.QWebEnginePage = _FakeWebEnginePage
     sys.modules["PyQt6.QtWebEngineCore"] = qt_webengine_core
 
+    qt_webchannel = _PermissiveModule("PyQt6.QtWebChannel")
+    qt_webchannel.QWebChannel = MagicMock()
+    sys.modules["PyQt6.QtWebChannel"] = qt_webchannel
+
     # Heavy vise submodules that view imports. We let them be MagicMocks
     # for any attribute access. Critically, vise.places and vise.database
     # are stubbed too: vise.view does `from .places import places` at

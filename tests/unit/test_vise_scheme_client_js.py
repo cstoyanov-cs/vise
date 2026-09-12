@@ -216,8 +216,14 @@ class TestClientJsPath:
         body = rq.reply_bytes.decode("utf-8")
         assert body == build_bundle(), "scheme handler must serve build_bundle() unchanged"
 
-    def test_client_js_body_contains_bridge_globals(self, patch_qbuffer):
-        """The bundle must define the bridge globals the Python host polls."""
+    def test_client_js_body_defines_legacy_bridge_globals(self, patch_qbuffer):
+        """The bundle must install the legacy title-toggle bridge
+        globals — Python polls the JS message queue via
+        ``window.get_messages_from_javascript`` and pushes Python->JS
+        messages via ``window.send_message_to_javascript``.
+
+        See vise/communicate.py for the architecture.
+        """
         from vise.vise_scheme import UrlSchemeHandler
 
         handler = UrlSchemeHandler()
@@ -226,6 +232,7 @@ class TestClientJsPath:
         body = rq.reply_bytes.decode("utf-8")
         assert "get_messages_from_javascript" in body
         assert "send_message_to_javascript" in body
+
 
 
 # ---------------------------------------------------------------------------

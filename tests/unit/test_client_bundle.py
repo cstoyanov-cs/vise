@@ -108,12 +108,18 @@ class TestBuildBundle:
             )
             assert proc.returncode == 0, f"{name} invalid:\n{proc.stderr}"
 
-    def test_bundle_defines_bridge_globals(self):
-        """The bundle sets window.get_messages_from_javascript which the host
-        Python side polls. The transform must preserve that side effect."""
+    def test_bundle_defines_legacy_bridge_globals(self):
+        """The bundle must install the legacy title-toggle bridge
+        globals — Python polls the JS message queue via
+        ``window.get_messages_from_javascript`` and pushes Python->JS
+        messages via ``window.send_message_to_javascript``.
+
+        See vise/communicate.py for the architecture.
+        """
         bundle = build_bundle()
         assert 'get_messages_from_javascript' in bundle
         assert 'send_message_to_javascript' in bundle
+
 
     def test_bundle_exposes_unique_onload_variants(self):
         """Module-level function name collisions (e.g. onload) are avoided by

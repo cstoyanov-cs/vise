@@ -180,7 +180,13 @@ SECRET_KEY = None
 
 
 def _ensure_runtime_secrets():
-    """Initialize TITLE_TOKEN and SECRET_KEY lazily, once per process."""
+    """Initialize TITLE_TOKEN and SECRET_KEY lazily, once per process.
+
+    Both are random per-process identifiers used by the JS<->Python
+    bridge. TITLE_TOKEN is the sentinel toggled into document.title
+    to notify Python that JS has queued messages; SECRET_KEY encrypts
+    the frame-to-frame postMessage payloads.
+    """
     global TITLE_TOKEN, SECRET_KEY
     if TITLE_TOKEN is None:
         TITLE_TOKEN = hexlify(os.urandom(32)).decode("ascii")

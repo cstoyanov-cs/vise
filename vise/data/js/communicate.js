@@ -1,10 +1,17 @@
 // Bridge between JavaScript and Python.
 //
-// The host page (vise.py via QWebEngine) calls into the browser by injecting
-// a sentinel token into document.title; this module watches that to dispatch
-// incoming messages. Outgoing messages are queued and surfaced to Python via
-// window.get_messages_from_javascript, which Python polls from a QTimer.
+// Communication uses the title-toggle polling mechanism. JS pushes a
+// message into a local queue, then toggles document.title with the
+// sentinel token (cfg_com.titleToken). Python's on_title_change
+// handler sees the sentinel, drains the queue via
+// window.get_messages_from_javascript(), and dispatches each entry
+// to the registered Python handler.
 //
+// Python->JS uses runJavaScript() to invoke
+// window.send_message_to_javascript(name, args), which dispatches to
+// subscribers registered via connectSignal(name, callback).
+//
+// Source of truth: client/communicate.pyj (rapydscript).
 
 const cfg_com = (typeof globalThis !== 'undefined' && globalThis.__VISE_CONFIG__) || {};
 const TITLE_TOKEN = cfg_com.titleToken || '';
@@ -35,7 +42,9 @@ export function connectSignal(name, func) {
 }
 
 function getMessagesFromJavascript() {
-    const t = toPython;
+    // Snapshot the queue FIRST, then drain. Otherwise the length=0
+    // mutation runs before JSON.stringify sees the items.
+    const t = toPython.slice();
     toPython.length = 0;
     return JSON.stringify(t);
 }

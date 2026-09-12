@@ -45,18 +45,22 @@ BUNDLE_RUNTIME_TEST = textwrap.dedent(r"""
 
     setTimeout(() => {
         const out = {
-            bridge_get: typeof dom.window.get_messages_from_javascript,
-            bridge_send: typeof dom.window.send_message_to_javascript,
+            jsToPythonType: typeof dom.window.jsToPython,
+            legacyGetType: typeof dom.window.get_messages_from_javascript,
+            legacySendType: typeof dom.window.send_message_to_javascript,
+            legacySendType: typeof dom.window.send_message_to_javascript,
+            // After the title-toggle bridge, these globals exist.
+            // Asserting they are defined catches a regression where
+            // the bundle fails to install the bridge.
+            // (The QWebChannel attempt was removed: see
+            // vise/communicate.py for the current architecture.)
             bundleError: bundleError ? String(bundleError) : null,
         };
         try {
-            const json = dom.window.get_messages_from_javascript();
-            out.emptyBridgeReturnsValidJson =
-                typeof json === 'string' && (() => {
-                    try { JSON.parse(json); return true; } catch { return false; }
-                })();
+            dom.window.jsToPython('element_focused', true);
+            out.jsToPythonNoThrow = true;
         } catch (e) {
-            out.emptyBridgeReturnsValidJson = false;
+            out.jsToPythonNoThrow = false;
         }
         process.stdout.write(JSON.stringify(out));
         process.exit(bundleError ? 1 : 0);
@@ -93,9 +97,18 @@ def test_bundle_executes_in_jsdom(tmp_path):
     assert proc.returncode == 0, f"jsdom smoke test failed.\nstdout: {proc.stdout}\nstderr: {proc.stderr}"
     out = json.loads(proc.stdout.strip().splitlines()[-1])
     assert out["bundleError"] is None, f"bundle raised: {out['bundleError']}"
-    assert out["bridge_get"] == "function"
-    assert out["bridge_send"] == "function"
-    assert out["emptyBridgeReturnsValidJson"] is True
+    assert out["jsToPythonType"] == "function", (
+        f"jsToPython not exposed as global: {out['jsToPythonType']!r}"
+    )
+    assert out["legacyGetType"] == "function", (
+        f"window.get_messages_from_javascript must be installed by the "
+        f"bundle (title-toggle bridge): {out['legacyGetType']!r}"
+    )
+    assert out["legacySendType"] == "function", (
+        f"window.send_message_to_javascript must be installed by the "
+        f"bundle (title-toggle bridge): {out['legacySendType']!r}"
+    )
+    assert out["jsToPythonNoThrow"] is True
 
 
 # ---------------------------------------------------------------------------
@@ -156,17 +169,15 @@ INSECURE_BUNDLE_RUNTIME_TEST = textwrap.dedent(r"""
     setTimeout(() => {
         const out = {
             bundleError: bundleError ? String(bundleError) : null,
-            bridge_get: typeof dom.window.get_messages_from_javascript,
-            bridge_send: typeof dom.window.send_message_to_javascript,
+            jsToPythonType: typeof dom.window.jsToPython,
+            legacyGetType: typeof dom.window.get_messages_from_javascript,
+            legacySendType: typeof dom.window.send_message_to_javascript,
         };
         try {
-            const json = dom.window.get_messages_from_javascript();
-            out.emptyBridgeReturnsValidJson =
-                typeof json === 'string' && (() => {
-                    try { JSON.parse(json); return true; } catch { return false; }
-                })();
+            dom.window.jsToPython('element_focused', true);
+            out.jsToPythonNoThrow = true;
         } catch (e) {
-            out.emptyBridgeReturnsValidJson = false;
+            out.jsToPythonNoThrow = false;
         }
         process.stdout.write(JSON.stringify(out));
         process.exit(bundleError ? 1 : 0);
@@ -217,18 +228,23 @@ def test_bundle_runs_in_insecure_context(tmp_path):
         f"This is the regression we are guarding against — crypto.js must "
         f"not call crypto.subtle on pages where it is unavailable."
     )
-    # If initCrypto threw, get_messages_from_javascript is never installed
-    # (registerFrames is the ``after`` callback that wires the bridge up).
-    assert out["bridge_get"] == "function", (
-        f"bridge not wired up: bridge_get={out['bridge_get']!r}. "
-        f"This means initCrypto never completed."
+    # If initCrypto threw, the bundle never finishes wiring up. The
+    # bridge contract is now jsToPython (exposed globally by communicate.js)
+    # plus the absence of legacy bridge globals.
+    assert out["jsToPythonType"] == "function", (
+        f"jsToPython not exposed: {out['jsToPythonType']!r}. "
+        f"This means the bundle never finished loading."
     )
-    assert out["bridge_send"] == "function"
+    assert out["legacyGetType"] == "function"
+    assert out["legacySendType"] == "function"
+    assert out["jsToPythonNoThrow"] is True
 
 
 def test_client_config_json_is_valid_json():
     raw = client_config_json()
     parsed = json.loads(raw)
+    # titleToken is the SENTINEL used by the title-toggle polling
+    # bridge; both keys are required.
     for key in ("titleToken", "secretKey", "hintFontSize", "hintForeground", "hintBackground", "selectedHintBackground"):
         assert key in parsed
     assert len(parsed["titleToken"]) == 64
@@ -298,8 +314,14 @@ BUNDLE_WITH_BOOTSTRAP_TEST = textwrap.dedent(r"""
         const cfg = dom.window.__VISE_CONFIG__;
         const cfgObj = cfg || {};
         const out = {
-            bridge_get: typeof dom.window.get_messages_from_javascript,
-            bridge_send: typeof dom.window.send_message_to_javascript,
+            jsToPythonType: typeof dom.window.jsToPython,
+            legacyGetType: typeof dom.window.get_messages_from_javascript,
+            legacySendType: typeof dom.window.send_message_to_javascript,
+            // After the title-toggle bridge, these globals exist.
+            // Asserting they are defined catches a regression where
+            // the bundle fails to install the bridge.
+            // (The QWebChannel attempt was removed: see
+            // vise/communicate.py for the current architecture.)
             bundleError: bundleError ? String(bundleError) : null,
             configSeen: typeof cfg,
             configHasExpectedKeys: (
@@ -307,20 +329,14 @@ BUNDLE_WITH_BOOTSTRAP_TEST = textwrap.dedent(r"""
                 'hintFontSize' in cfgObj &&
                 'hintForeground' in cfgObj
             ),
-            // Critical: the value hints.js saw at module load. If this
-            // matches the injected __VISE_CONFIG__, the bootstrap ran
-            // before the bundle. If undefined, the bootstrap came too
-            // late (or not at all).
             hintFontSizeSeenByBundle:
                 dom.window.__sentry_test_hints?.hintFontSize,
         };
         try {
-            out.emptyBridgeReturnsValidJson = (() => {
-                const json = dom.window.get_messages_from_javascript();
-                try { JSON.parse(json); return true; } catch { return false; }
-            })();
+            dom.window.jsToPython('element_focused', true);
+            out.jsToPythonNoThrow = true;
         } catch (e) {
-            out.emptyBridgeReturnsValidJson = false;
+            out.jsToPythonNoThrow = false;
         }
         process.stdout.write(JSON.stringify(out));
         process.exit(bundleError ? 1 : 0);
@@ -411,9 +427,18 @@ def test_bootstrap_plus_bundle_runs_cleanly(tmp_path):
     assert proc.returncode == 0, f"bootstrap+bundle jsdom test failed.\nstdout: {proc.stdout}\nstderr: {proc.stderr}"
     out = json.loads(proc.stdout.strip().splitlines()[-1])
     assert out["bundleError"] is None, f"bundle raised: {out['bundleError']}"
-    assert out["bridge_get"] == "function"
-    assert out["bridge_send"] == "function"
-    assert out["emptyBridgeReturnsValidJson"] is True
+    assert out["jsToPythonType"] == "function", (
+        f"jsToPython not exposed as global: {out['jsToPythonType']!r}"
+    )
+    assert out["legacyGetType"] == "function", (
+        f"window.get_messages_from_javascript must be installed by the "
+        f"bundle (title-toggle bridge): {out['legacyGetType']!r}"
+    )
+    assert out["legacySendType"] == "function", (
+        f"window.send_message_to_javascript must be installed by the "
+        f"bundle (title-toggle bridge): {out['legacySendType']!r}"
+    )
+    assert out["jsToPythonNoThrow"] is True
     assert out["configSeen"] == "object", f"__VISE_CONFIG__ not seen on window: {out['configSeen']}"
     # THE critical assertion: hints.js evaluated at module load must
     # have seen the same hintFontSize the bootstrap injected. If the

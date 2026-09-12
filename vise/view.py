@@ -112,6 +112,16 @@ def edit_text(viewref, text, frame_id, eid):  # {{{
 
 
 class WebPage(QWebEnginePage):
+    """Per-tab web page. Bridges JS<->Python via the title-token polling
+    loop (see vise/communicate.py for the full architecture).
+
+    ``poll_for_messages`` is emitted from ``on_title_change`` when JS
+    toggles ``document.title`` with the sentinel token. The handler
+    ``check_for_messages_from_js`` then fetches the JS message queue
+    via ``window.get_messages_from_javascript`` and dispatches each
+    entry to the registered Python handler.
+    """
+
     poll_for_messages = pyqtSignal()
 
     def __init__(self, profile, parent):
@@ -204,7 +214,7 @@ class WebPage(QWebEnginePage):
         for s in (
             "authenticationRequired proxyAuthenticationRequired linkHovered permissionRequested"
             " fullScreenRequested windowCloseRequested quotaRequested"
-            " poll_for_messages audioMutedChanged certificateError"
+            " audioMutedChanged certificateError"
         ).split():
             safe_disconnect(getattr(self, s))
         # Without the next two lines we get a crash on exit with Qt 5.8.0
@@ -272,6 +282,10 @@ class WebView(QWebEngineView):
         self.text_input_focused = False
         self.loading_in_progress = False
         self._force_passthrough = False
+        # Track the last title observed so the JS-restore-after-poll
+        # case can be distinguished from a real navigation. See
+        # WebView.on_title_change for how this is read.
+        self._last_seen_title = ""
         self.titleChanged.connect(self.on_title_change)
         self.renderProcessTerminated.connect(self.render_process_terminated)
         self.callback_on_save_edit_text_node = None
@@ -402,20 +416,44 @@ class WebView(QWebEngineView):
         self.runjs(f"window.scrollTo({x}, {y})")
 
     def on_title_change(self, title):
+        """Wake-up handler for the JS<->Python bridge.
+
+        When JS pushes a message via the title-toggle mechanism, this
+        handler fires twice (once with the SENTINEL token, once with
+        the original title restored). We treat the two cases
+        distinctly so polling wake-ups never hit SQLite or UI:
+
+          - title == TITLE_TOKEN: polling wake-up. Emit
+            ``poll_for_messages`` so Python picks up the queued JS
+            message. No DB write, no UI refresh.
+          - title == last seen title: JS just restored the title
+            after a polling wake-up. Nothing to do.
+          - title differs from last seen title: real navigation. Do
+            the SQLite + UI update.
+
+        ``_last_seen_title`` is updated only on real changes, so the
+        next JS poll restores to the right value.
+        """
         from .settings import TITLE_TOKEN
 
-        if title != TITLE_TOKEN:
+        if title == TITLE_TOKEN:
             try:
-                places.on_title_change(self.url(), title)
-            except Exception:
-                import traceback
+                self._page.poll_for_messages.emit()
+            except RuntimeError:
+                pass  # happens if page is deleted
+            return
 
-                traceback.print_exc()
-            self.title_changed.emit(title)
+        if title == self._last_seen_title:
+            return
+
+        self._last_seen_title = title
         try:
-            self._page.poll_for_messages.emit()
-        except RuntimeError:
-            pass  # happens if page is deleted
+            places.on_title_change(self.url(), title)
+        except Exception:
+            import traceback
+
+            traceback.print_exc()
+        self.title_changed.emit(title)
 
     def on_icon_changed(self, icon):
         from .main import save_favicon
@@ -812,8 +850,8 @@ class WebView(QWebEngineView):
                 _("No match for %s!") % text, 5000, "error"
             )
 
-    def set_editable_text(self, *args):
-        python_to_js(self, "set_editable_text", *args)
+    def set_editable_text(self, text, frame_id, eid):
+        python_to_js(self, "set_editable_text", text, frame_id, eid)
 
     @connect_signal()
     def edit_text(self, text, frame_id, eid):

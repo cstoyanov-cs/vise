@@ -23,13 +23,45 @@ async function prepareMessage(payload) {
     };
 }
 
+// Guard against `win` being anything other than a real Window with a
+// `postMessage` method. Without this, three failure modes throw
+// "win.postMessage is not a function" at runtime:
+//
+//   1. `frameForId(id)` returns undefined when the frame was removed
+//      between lookup and send (e.g. page navigated away while we
+//      were dispatching a hint action).
+//   2. `event.source` from a postMessage event is null when the
+//      sender frame was destroyed between sending and our reply.
+//   3. `frameIter()` can yield a DOM frame element instead of a
+//      Window in some edge cases (cross-origin frames whose Window
+//      proxy was revoked).
+function isPostableWindow(win) {
+    return (
+        win !== null &&
+        win !== undefined &&
+        typeof win === 'object' &&
+        typeof win.postMessage === 'function'
+    );
+}
+
 function postMessage(win, payload) {
-    prepareMessage(payload).then((msg) => win.postMessage(msg, '*'));
+    if (!isPostableWindow(win)) {
+        // Stale frame or invalid target — drop silently. The action
+        // is lost but the page is in an inconsistent state anyway;
+        // we don't want to spam the console with TypeErrors.
+        return;
+    }
+    prepareMessage(payload).then((msg) => {
+        if (!isPostableWindow(win)) return;  // re-check after async wait
+        win.postMessage(msg, '*');
+    });
 }
 
 function broadcastMessage(windows, payload) {
     prepareMessage(payload).then((msg) => {
-        for (const win of windows) win.postMessage(msg, '*');
+        for (const win of windows) {
+            if (isPostableWindow(win)) win.postMessage(msg, '*');
+        }
     });
 }
 
@@ -78,7 +110,7 @@ export function* frameIter(win, filterFunc = null) {
         if (filterFunc === null || fe === null || filterFunc(fe)) {
             yield frame;
         }
-        yield* frameIter(frame, filterFunc);
+        yield* frameIter(frame);
     }
 }
 
@@ -127,7 +159,16 @@ function prepareAction(name, args, kwargs) {
 }
 
 export function sendAction(win, name, ...args) {
-    const target = typeof win === 'number' ? frameForId(win) : win;
+    let target;
+    if (typeof win === 'number') {
+        target = frameForId(win);
+        // frameForId returns undefined when the frame was navigated
+        // away. Skip silently — the action is lost but we cannot
+        // deliver to a vanished frame.
+        if (target === undefined) return;
+    } else {
+        target = win;
+    }
     postMessage(target, prepareAction(name, args, {}));
 }
 

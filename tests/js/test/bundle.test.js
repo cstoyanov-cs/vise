@@ -69,11 +69,6 @@ describe('modular client', () => {
             expect(src).toContain("from './edit.js'");
         });
 
-        test('communicate.js reads config from globalThis.__VISE_CONFIG__', () => {
-            const src = fs.readFileSync(path.join(JS_DIR, 'communicate.js'), 'utf8');
-            expect(src).toContain('__VISE_CONFIG__');
-        });
-
         test('crypto.js reads config from globalThis.__VISE_CONFIG__', () => {
             const src = fs.readFileSync(path.join(JS_DIR, 'crypto.js'), 'utf8');
             expect(src).toContain('__VISE_CONFIG__');

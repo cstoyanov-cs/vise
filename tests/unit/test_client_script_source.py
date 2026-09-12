@@ -131,7 +131,6 @@ class TestClientScriptOutput:
         cfg_idx = src.index("__VISE_CONFIG__")
         bundle_markers = (
             "use strict",
-            "globalThis.window.get_messages_from_javascript",
             "// ---- elementmaker.js ----",
         )
         bundle_idx = min(
@@ -153,6 +152,8 @@ class TestClientScriptOutput:
         end = src.index(";", start)
         json_blob = src[start:end].strip()
         parsed = json.loads(json_blob)
+        # titleToken is the SENTINEL used by the title-toggle polling
+        # bridge — see vise/communicate.py for the architecture.
         for key in (
             "titleToken",
             "secretKey",

@@ -82,6 +82,10 @@ def _install_qt_for_view(tmp_path):
     qt_webengine_core.QWebEnginePage = _FakeWebEnginePage
     sys.modules["PyQt6.QtWebEngineCore"] = qt_webengine_core
 
+    qt_webchannel = _PermissiveModule("PyQt6.QtWebChannel")
+    qt_webchannel.QWebChannel = MagicMock()
+    sys.modules["PyQt6.QtWebChannel"] = qt_webchannel
+
     heavy = (
         "vise.welcome",
         "vise.downloads",
