@@ -213,7 +213,7 @@ describe('hints.js: accumulatedKeypresses', () => {
         // markingDone is still false; keypress is queued.
         followLink('0');
         // Now the subframe reports back with one hint.
-        const report = frames.__topHandlers.reportMarkedHints;
+        const report = frames.__topHandlers['report_marked_hints'];
         expect(typeof report).toBe('function');
         report(0, 1, fakeSubframe, 1, [
             { frame_id: 1, num: 0, top: 10, left: 10 },
@@ -297,4 +297,99 @@ describe('hints.js: error handling and debug', () => {
         expect(errors.some((args) => String(args[0]).includes('error in'))).toBe(true);
     });
 
+});
+
+describe('hints.js: follow-mode end-to-end round trip (regression)', () => {
+    // In commit 0501acb, the rapydscript→JS conversion renamed function
+    // declarations from snake_case (find_hints, report_marked_hints,
+    // hints_assigned, hints_filtered) to camelCase (findHints,
+    // reportMarkedHints, ...). However the broadcast/sendAction strings
+    // stayed snake_case. frames.js dispatches by string action name
+    // (handlers['find_hints']), but handlers were registered as
+    // handlers['findHints'] → lookup returned undefined → iframes never
+    // responded → numLeft never reached 0 → assignHints never ran →
+    // markingDone stayed false → user stuck (keypresses piled in
+    // accumulatedKeypresses forever, including |escape).
+
+    // These tests simulate the iframe responding by manually invoking the
+    // subframe / top-frame handler under its *action-string* key (the name
+    // that frames.js uses to dispatch). Before the fix the lookup returned
+    // undefined and the simulated response had no effect; after the fix the
+    // handler exists and the user's keypress is processed normally.
+
+    test('iframe can respond via the report_marked_hints action and user can exit', () => {
+        const fakeSubframe = { postMessage: () => {}, frames: [] };
+        frames.frameIter.mockReturnValue([fakeSubframe]);
+
+        buildPage('<a href="#">A</a>');
+        loadHints();
+        startFollowLink();
+
+        // Simulate the iframe responding (this is what would happen in a
+        // browser once the action name matches the handler name).
+        const reportHandler = frames.__topHandlers['report_marked_hints'];
+        expect(typeof reportHandler).toBe('function');
+        reportHandler(0, 1, fakeSubframe, 1, [
+            { frame_id: 1, num: 0, top: 10, left: 10 },
+        ]);
+
+        // Now the user can exit.
+        followLink('|escape');
+        const msgs = drainMessages();
+        expect(msgs).toContainEqual({
+            type: 'js_to_python', name: 'link_followed', args: [false, '|escape'],
+        });
+    });
+
+    test('iframe response triggers reassignment of hints_assigned to the right labels', () => {
+        const fakeSubframe = { postMessage: () => {}, frames: [] };
+        frames.frameIter.mockReturnValue([fakeSubframe]);
+
+        buildPage('<a href="#">A</a>');
+        loadHints();
+        startFollowLink();
+
+        // Verify the hint is tagged with the raw index (not yet relabeled).
+        const before = Array.from(document.querySelectorAll('[data-vise-hint]'));
+        expect(before[0].getAttribute('data-vise-hint')).toBe('0');
+
+        // Simulate the iframe responding with a hint that's positioned
+        // above the top-frame hint (top=5 vs the top frame's top=10).
+        const reportHandler = frames.__topHandlers['report_marked_hints'];
+        expect(typeof reportHandler).toBe('function');
+        reportHandler(0, 1, fakeSubframe, 1, [
+            { frame_id: 1, num: 0, top: 5, left: 10 },
+        ]);
+
+        // After assignHints ran, the top-frame hint must be relabeled.
+        // The iframe hint is now index 0 (sorts first by top); the
+        // top-frame hint is index 1 → base-36 label '1'.
+        // (The iframe's hint lives in its own DOM and isn't visible here.)
+        const after = Array.from(document.querySelectorAll('[data-vise-hint]'));
+        const labels = after.map(e => e.getAttribute('data-vise-hint'));
+        expect(labels).toEqual(['1']);
+    });
+});
+
+describe('hints.js: handler / action name consistency (regression)', () => {
+    // Root-cause test for the deadlock: every string passed to broadcastAction
+    // / sendAction must have a matching handler registered in frames.js.
+    // The rapydscript→JS conversion renamed function definitions to
+    // camelCase but left the action strings in snake_case, so the lookup
+    // handlers['find_hints'] (and three others) returned undefined.
+
+    test('every broadcast/send action string has a matching handler', () => {
+        loadHints();
+
+        const subframeHandlers = frames.__subframeHandlers;
+        const topHandlers = frames.__topHandlers;
+
+        // Top frame → subframes (find_hints, hints_assigned, hints_filtered)
+        expect(subframeHandlers['find_hints']).toBeDefined();
+        expect(subframeHandlers['hints_assigned']).toBeDefined();
+        expect(subframeHandlers['hints_filtered']).toBeDefined();
+
+        // Subframes → top frame (report_marked_hints)
+        expect(topHandlers['report_marked_hints']).toBeDefined();
+    });
 });

@@ -65,7 +65,7 @@ function broadcastMessage(windows, payload) {
     });
 }
 
-function handleMessageFromFrame(source, sourceId, data) {
+export function handleMessageFromFrame(source, sourceId, data) {
     const action = data.action;
     if (action === '*register') {
         if (source !== undefined && source !== null) {
@@ -80,7 +80,7 @@ function handleMessageFromFrame(source, sourceId, data) {
         if (handler) {
             const args = data.args ?? [];
             const kw = data.kwargs ?? {};
-            handler(frameId, sourceId, source, ...args, ...kw);
+            handler(frameId, sourceId, source, ...args, kw);
         }
     }
 }

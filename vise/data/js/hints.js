@@ -68,14 +68,14 @@ function startFollowLink(action) {
     if (!hasFrames) assignHints();
 }
 
-registerSubframeHandler(safeHandler('findHints', function findHints(
+registerSubframeHandler(safeHandler('find_hints', function find_hints(
     currentFrameId, sourceFrameId, sourceFrame, action, requestId,
 ) {
     const hints = markVisibleHints(action, currentFrameId);
     sendAction(sourceFrame, 'report_marked_hints', requestId, hints);
 }));
 
-registerTopHandler(safeHandler('reportMarkedHints', function reportMarkedHints(
+registerTopHandler(safeHandler('report_marked_hints', function report_marked_hints(
     currentFrameId, sourceFrameId, sourceFrame, requestId, hints,
 ) {
     if (requestId !== currentRequest.id) return;
@@ -163,7 +163,7 @@ function updateHintNumbers(hintMap) {
     }
 }
 
-registerSubframeHandler(safeHandler('hintsAssigned', function hintsAssigned(
+registerSubframeHandler(safeHandler('hints_assigned', function hints_assigned(
     currentFrameId, sourceFrameId, sourceFrame, hints,
 ) {
     updateHintNumbers(hints);
@@ -273,7 +273,7 @@ function activateElem(elem) {
     }
 }
 
-registerSubframeHandler(safeHandler('hintsFiltered', function hintsFiltered(
+registerSubframeHandler(safeHandler('hints_filtered', function hints_filtered(
     currentFrameId, sourceFrameId, sourceFrame, hints, foundTarget,
 ) {
     updateFilteredHints(hints, foundTarget);

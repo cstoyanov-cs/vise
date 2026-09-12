@@ -27,5 +27,9 @@ function onDocumentLoaded() {
 }
 
 initCrypto(registerFrames).then(() => {
-    document.addEventListener('DOMContentLoaded', onDocumentLoaded);
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', onDocumentLoaded);
+    } else {
+        onDocumentLoaded();
+    }
 });

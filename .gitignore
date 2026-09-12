@@ -1,6 +1,7 @@
 # Build artifacts
 file::memory:*
 tags
+.build-cache
 __pycache__
 
 # Python packaging (hatchling + uv)

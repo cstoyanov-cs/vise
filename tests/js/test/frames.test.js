@@ -158,3 +158,118 @@ describe('frames.js: postMessage defensive contract', () => {
         await new Promise((r) => setTimeout(r, 50));
     });
 });
+
+describe('frames.js: handler dispatch contract (regression)', () => {
+    // The rapydscript→JS conversion (commit 0501acb) translated the
+    // original frames.pyj dispatch from:
+    //
+    //     f(frame_id, source_id, source, *args, **kw)
+    //
+    // to:
+    //
+    //     handler(frameId, sourceId, source, ...args, ...kw)
+    //
+    // The spread `...kw` requires kw to be an iterable. Every action
+    // sent through prepareAction uses `kwargs: {}` (plain object), which
+    // is NOT iterable. Result: every cross-frame message throws
+    // "object is not iterable" in handleMessageFromFrame, the iframe
+    // never sends back report_marked_hints, and the user gets stuck in
+    // follow-link mode because assignHints never runs.
+    //
+    // The rapydscript behavior was: pass kw as the LAST argument
+    // (a single object), so the spread on kw is wrong. The fix is to
+    // pass kw as a single trailing argument.
+
+    let capturedHandler;
+    let capturedFrameId;
+    let capturedSourceId;
+    let capturedSource;
+    let capturedRest;
+    let framesMod;
+
+    beforeEach(async () => {
+        jest.resetModules();
+        capturedFrameId = null;
+        capturedSourceId = null;
+        capturedSource = undefined;
+        capturedRest = null;
+        capturedHandler = function capture(frameId, sourceId, source, ...rest) {
+            capturedFrameId = frameId;
+            capturedSourceId = sourceId;
+            capturedSource = source;
+            capturedRest = rest;
+        };
+        framesMod = await import('../../../vise/data/js/frames.js');
+        // registerHandler(name, func) — the name must match the action
+        // string the broadcaster used. hints.js broadcasts with
+        // snake_case action strings ('find_hints', etc.).
+        framesMod.registerHandler('test_capture_action', capturedHandler);
+    });
+
+    test('handler is called without throwing when kwargs is an empty object', () => {
+        // This is the exact payload shape prepareAction produces:
+        // { action: '...', args: [...], kwargs: {} }
+        expect(() => {
+            framesMod.handleMessageFromFrame(
+                /* source */ null,
+                /* sourceId */ 1,
+                /* data */ {
+                    action: 'test_capture_action',
+                    args: ['arg1', 'arg2'],
+                    kwargs: {},
+                },
+            );
+        }).not.toThrow();
+        // Expected call shape (rapydscript-compatible):
+        //   handler(frameId, sourceId, source, ...args, kw)
+        // The kw object is the LAST positional argument, not spread.
+        expect(capturedFrameId).toBe(0);
+        expect(capturedSourceId).toBe(1);
+        expect(capturedSource).toBeNull();
+        expect(capturedRest).toEqual(['arg1', 'arg2', {}]);
+    });
+
+    test('handler is called without throwing when kwargs contains entries', () => {
+        expect(() => {
+            framesMod.handleMessageFromFrame(
+                null,
+                1,
+                {
+                    action: 'test_capture_action',
+                    args: [],
+                    kwargs: { someKey: 'someValue' },
+                },
+            );
+        }).not.toThrow();
+        // The handler must have been invoked (the bug was that
+        // `...kw` threw before the call site).
+        expect(capturedFrameId).toBe(0);
+        expect(capturedSourceId).toBe(1);
+        expect(capturedSource).toBeNull();
+        // Empty args, then kw object as trailing argument.
+        expect(capturedRest).toEqual([{ someKey: 'someValue' }]);
+    });
+
+    test('kw is passed as a single trailing argument (rapydscript-compatible)', () => {
+        // In rapydscript, `f(*args, **kw)` compiles to passing kw as
+        // the LAST argument (a single object), not spreading it. The
+        // JS rewrite must preserve this contract so existing handlers
+        // that ignore the extra arg continue to work.
+        let lastArg = Symbol('not-set');
+        const handler = function (frameId, sourceId, source, ...rest) {
+            lastArg = rest[rest.length - 1];
+        };
+        framesMod.registerHandler('test_kw_position', handler);
+
+        const kw = { nested: { value: 42 } };
+        framesMod.handleMessageFromFrame(null, 1, {
+            action: 'test_kw_position',
+            args: ['only_arg'],
+            kwargs: kw,
+        });
+
+        // The kw object must appear as the LAST positional argument,
+        // intact (not spread, not iterated).
+        expect(lastArg).toBe(kw);
+    });
+});
