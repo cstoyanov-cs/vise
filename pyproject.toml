@@ -1,5 +1,5 @@
 [project]
-name = "vise"
+name = "vise-dev"
 version = "0.1.0"
 description = "A keyboard driven browser with tabs in a tree (QtWebEngine)."
 readme = "README.md"
