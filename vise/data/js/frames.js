@@ -35,7 +35,7 @@ async function prepareMessage(payload) {
 //   3. `frameIter()` can yield a DOM frame element instead of a
 //      Window in some edge cases (cross-origin frames whose Window
 //      proxy was revoked).
-function isPostableWindow(win) {
+export function isPostableWindow(win) {
     return (
         win !== null &&
         win !== undefined &&

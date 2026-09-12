@@ -7,7 +7,8 @@ import { connectSignal, jsToPython } from './communicate.js';
 import E from './elementmaker.js';
 import { isVisible } from './utils.js';
 import {
-    broadcastAction, sendAction, registerSubframeHandler, registerTopHandler, frameIter,
+    broadcastAction, sendAction, registerSubframeHandler, registerTopHandler,
+    frameIter, isPostableWindow,
 } from './frames.js';
 const cfg_hints = (typeof globalThis !== 'undefined' && globalThis.__VISE_CONFIG__) || {};
 const hintFontSize = cfg_hints.hintFontSize || '14';
@@ -18,13 +19,41 @@ const selectedHintBackground = cfg_hints.selectedHintBackground || 'khaki';
 const REPLACED_ELEM_TAG = 'vise-replaced-elem-hint';
 const ATTR = 'data-vise-hint';
 
+// Wrap a handler so exceptions are logged instead of swallowed by
+// runJavaScript (which only emits to the V8 console). The returned
+// function preserves the original `this`, arguments, and `.name`
+// (important: registerHandler keys subframe/top handlers by name).
+function reportError(label, err) {
+    console.error('[hints] error in', label, err && (err.stack || err.message || err));
+}
+function safeHandler(label, fn) {
+    const wrapped = function (...args) {
+        try {
+            return fn.apply(this, args);
+        } catch (err) {
+            reportError(label, err);
+        }
+    };
+    try {
+        Object.defineProperty(wrapped, 'name', { value: fn.name, configurable: true });
+    } catch {
+        // Some engines forbid redefining name; fall back to anonymous.
+    }
+    return wrapped;
+}
+
 const currentRequest = {
     id: 0,
     accumulatedKeypresses: [],
 };
 
 function startFollowLink(action) {
-    const frames = [...frameIter(window.top, isVisible)];
+    // Cross-origin frames cannot reply to find_hints, so counting them would
+    // block markingDone forever (deadlock: every keypress piles up in
+    // accumulatedKeypresses and even |escape is swallowed by the
+    // !markingDone guard in followLink).
+    const frames = [...frameIter(window.top, isVisible)]
+        .filter(isPostableWindow);
     currentRequest.numLeft = frames.length;
     currentRequest.action = action;
     currentRequest.id += 1;
@@ -39,19 +68,21 @@ function startFollowLink(action) {
     if (!hasFrames) assignHints();
 }
 
-registerSubframeHandler(function findHints(currentFrameId, sourceFrameId, sourceFrame, action, requestId) {
+registerSubframeHandler(safeHandler('findHints', function findHints(
+    currentFrameId, sourceFrameId, sourceFrame, action, requestId,
+) {
     const hints = markVisibleHints(action, currentFrameId);
     sendAction(sourceFrame, 'report_marked_hints', requestId, hints);
-});
+}));
 
-registerTopHandler(function reportMarkedHints(
+registerTopHandler(safeHandler('reportMarkedHints', function reportMarkedHints(
     currentFrameId, sourceFrameId, sourceFrame, requestId, hints,
 ) {
     if (requestId !== currentRequest.id) return;
     currentRequest.numLeft -= 1;
     currentRequest.hintGroups.push(hints);
     if (currentRequest.numLeft < 1) assignHints();
-});
+}));
 
 function addHintMarkup(elem, i) {
     const tname = elem.tagName.toLowerCase();
@@ -105,12 +136,15 @@ function assignHints() {
     let allHints = [];
     for (const hg of currentRequest.hintGroups) allHints = allHints.concat(hg);
     const hintGroups = {};
-    currentRequest.allHints = allHints.sort((a, b) => [a.top, a.left] - [b.top, b.left]);
+    currentRequest.allHints = allHints.sort((a, b) => (a.top - b.top) || (a.left - b.left));
     for (const [i, hint] of currentRequest.allHints.entries()) {
         const iStr = i.toString(36).toLowerCase();
         const fid = hint.frame_id;
         if (!hintGroups[fid]) hintGroups[fid] = {};
-        hintGroups[fid][hint.num] = hint.num = hint.text_left = iStr;
+        const oldNum = hint.num;
+        hint.text_left = iStr;
+        hint.num = iStr;
+        hintGroups[fid][oldNum] = iStr;
     }
     for (const fidStr of Object.keys(hintGroups)) {
         const fid = parseInt(fidStr, 10);
@@ -129,9 +163,11 @@ function updateHintNumbers(hintMap) {
     }
 }
 
-registerSubframeHandler(function hintsAssigned(currentFrameId, sourceFrameId, sourceFrame, hints) {
+registerSubframeHandler(safeHandler('hintsAssigned', function hintsAssigned(
+    currentFrameId, sourceFrameId, sourceFrame, hints,
+) {
     updateHintNumbers(hints);
-});
+}));
 
 function followLink(text) {
     if (!currentRequest.markingDone) {
@@ -237,11 +273,11 @@ function activateElem(elem) {
     }
 }
 
-registerSubframeHandler(function hintsFiltered(
+registerSubframeHandler(safeHandler('hintsFiltered', function hintsFiltered(
     currentFrameId, sourceFrameId, sourceFrame, hints, foundTarget,
 ) {
     updateFilteredHints(hints, foundTarget);
-});
+}));
 
 export function hintsOnload() {
     if (!document.body) return;
@@ -273,7 +309,7 @@ export function hintsOnload() {
     }
     `));
     if (window.self === window.top) {
-        connectSignal('start_follow_link', startFollowLink);
-        connectSignal('follow_link', followLink);
+        connectSignal('start_follow_link', safeHandler('start_follow_link', startFollowLink));
+        connectSignal('follow_link', safeHandler('follow_link', followLink));
     }
 }

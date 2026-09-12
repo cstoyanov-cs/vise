@@ -94,7 +94,13 @@ exclude_lines = [
 [tool.ruff]
 line-length = 160
 target-version = "py311"
-extend-exclude = ["=template.py"]
+extend-exclude = [
+    "=template.py",
+    "MagicMock",
+    ".opencode",
+    "vise/data/js",
+    "tests/js",
+]
 
 [tool.ruff.lint]
 select = ["E", "W", "F"]

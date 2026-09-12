@@ -121,7 +121,6 @@ class TestAesExports:
 # Coverage of all three key sizes (128/192/256) protects the key schedule
 # from regressions on the KC != 8 branch of the original Python source.
 
-import pytest
 
 NIST_VECTORS = [
     pytest.param(
