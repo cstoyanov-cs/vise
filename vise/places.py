@@ -434,33 +434,6 @@ class Places:
         for place_id, url, title in results:
             yield place_id, url, title
 
-    def subsequence_matches(self, subsequence=None, limit=50):
-        s = subsequence  # capture locale
-
-        def do_query(conn):
-            c = conn.cursor()
-            if not s:
-                return list(
-                    c.execute(
-                        "SELECT id, url, title FROM PLACES ORDER BY frecency DESC LIMIT ?",
-                        (limit,),
-                    )
-                )
-            sub_normalized = normalize((s or "")[:20])
-            like_expr = re.sub(r"([|%_])", r"|\1", sub_normalized.lower())
-            like_expr = "%" + "%".join(like_expr) + "%"
-            return list(
-                c.execute(
-                    'SELECT id, url, title FROM places WHERE url_lower LIKE ? ESCAPE "|" OR title_lower LIKE ? ESCAPE "|" ORDER BY frecency DESC LIMIT ?',
-                    (like_expr, like_expr, limit),
-                )
-            )
-
-        results = Database.get(self.path).execute_and_wait(do_query)
-        for place_id, url, title in results:
-            yield place_id, url, title
-
-
 places = Places()
 
 
@@ -474,66 +447,3 @@ def favicon_url(place_id):
         place_id,
     )
     return result[0] if result else None
-
-
-def import_from_firefox():
-    global places
-    from glob import glob
-
-    Database._instances.pop(places.path, None)
-    os.remove(places.path)
-    places = Places()
-
-    conn = apsw.Connection(
-        glob(os.path.expanduser("~/.mozilla/firefox/*/places.sqlite"))[0]
-    )
-    place_id_map = {}
-
-    print("Importing places table")
-    for (
-        place_id,
-        url,
-        title,
-        visit_count,
-        typed,
-        frecency,
-        last_visit_date,
-    ) in conn.cursor().execute(
-        "SELECT id,url,title,visit_count,typed,frecency,last_visit_date FROM moz_places"
-    ):
-        if last_visit_date and visit_count and frecency > 0 and url:
-            place_id_map[place_id] = places.insert(
-                "places",
-                url=url,
-                title=title or "_",
-                visit_count=visit_count,
-                typed=typed,
-                frecency=frecency,
-                last_visit_date=last_visit_date,
-            )
-
-    print("Importing visits table")
-    items = []
-    for (
-        place_id,
-        visit_date,
-        visit_type,
-    ) in conn.cursor().execute(
-        "SELECT place_id,visit_date,visit_type FROM moz_historyvisits"
-    ):
-        place_id = place_id_map.get(place_id)
-        if place_id is not None and visit_date and visit_type in (1, 2):
-            items.append(
-                (
-                    place_id,
-                    visit_date,
-                    {
-                        1: QWebEnginePage.NavigationType.NavigationTypeLinkClicked,
-                        2: QWebEnginePage.NavigationType.NavigationTypeTyped,
-                    }[visit_type].value,
-                )
-            )
-
-    print("Vacuuming...")
-    conn.cursor().execute("VACUUM")
-    conn.close()

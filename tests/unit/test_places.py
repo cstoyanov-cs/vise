@@ -62,7 +62,6 @@ class TestPlacesClass:
         assert hasattr(Places, 'on_favicon_change')
         # Autocomplete queries
         assert hasattr(Places, 'substring_matches')
-        assert hasattr(Places, 'subsequence_matches')
         # Merging / dedup
         assert hasattr(Places, 'merge_places')
         assert hasattr(Places, 'merge_https_places')
