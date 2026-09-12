@@ -35,7 +35,7 @@ dev = [
 # injected into every page load the entry point main.js directly.
 
 [project.scripts]
-vise = "vise.main:main"
+vise-dev = "vise.main:main"
 
 [project.urls]
 Upstream = "https://github.com/kovidgoyal/vise"
