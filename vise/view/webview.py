@@ -4,16 +4,12 @@
 
 import json
 import os
-import shlex
-import subprocess
-import weakref
 from base64 import standard_b64encode
 from functools import partial
-from gettext import gettext as _
-from itertools import count
-from tempfile import NamedTemporaryFile
 from threading import Thread
 from time import monotonic
+from gettext import gettext as _
+from weakref import ref as _weakref
 
 from PyQt6 import sip
 from PyQt6.QtCore import QEvent, QMarginsF, QSize, Qt, QUrl, pyqtSignal
@@ -25,210 +21,28 @@ from PyQt6.QtWebEngineCore import (
     QWebEngineScript,
 )
 from PyQt6.QtWebEngineWidgets import QWebEngineView
-from PyQt6.QtWidgets import (
-    QApplication,
-    QCheckBox,
-    QDialogButtonBox,
-    QGridLayout,
-    QLabel,
-)
+from PyQt6.QtWidgets import QApplication
 
-from .auth import get_http_auth_credentials, get_proxy_auth_credentials
-from .certs import cert_exceptions
-from .communicate import connect_signal, js_to_python, python_to_js
-from .config import misc_config, is_password_storage_enabled
-from .constants import FOLLOW_LINK_KEY_MAP
-from .dev_tools import DevTools
-from .downloads import get_download_dir
-from .message_box import question_dialog
-from .passwd.db import key_from_url, password_db, password_exclusions
-from .places import places, canonical_merge_key
-from .popup import Popup
-from .settings import gprefs
-from .site_permissions import site_permissions
-from .utils import Dialog, icon_to_data, open_local_file, safe_disconnect
+from ..config import misc_config, is_password_storage_enabled
+from ..constants import FOLLOW_LINK_KEY_MAP
+from ..communicate import connect_signal, python_to_js
+from ..dev_tools import DevTools
+from ..downloads import get_download_dir
+from ..message_box import question_dialog
+from ..passwd.db import key_from_url, password_db, password_exclusions
+from ..places import places, canonical_merge_key
+from ..popup import Popup
+from ..settings import gprefs
+from ..site_permissions import site_permissions
+from ..utils import icon_to_data, open_local_file, safe_disconnect
+
+from itertools import count
+
+from .page import WebPage
+
+from .editor import edit_text as _edit_text_fn
 
 view_id = count()
-certificate_error_domains = set()
-
-
-class Alert(Dialog):  # {{{
-    suppressed_alerts: set[str] = set()
-
-    def __init__(self, title, qurl, msg, parent):
-        title = title or qurl.host() or qurl.toString()
-        self.msg = msg
-        self.key = qurl.toString()
-        Dialog.__init__(self, _("Alert from") + ": " + title, "alert", parent)
-
-    def setup_ui(self):
-        self.lay = lay = QGridLayout(self)
-        self.la = la = QLabel(self.msg)
-        la.setWordWrap(True)
-        lay.addWidget(la, 0, 0, 1, -1)
-        self.setMaximumWidth(self.parent().width())
-        self.setMaximumHeight(self.parent().height())
-        self.cb = cb = QCheckBox(_("&Suppress future alerts from this site"), self)
-        cb.toggled.connect(self.suppress_toggled)
-        lay.addWidget(cb, 1, 0)
-        (
-            lay.addWidget(self.bb, 1, 1),
-            self.bb.setStandardButtons(QDialogButtonBox.StandardButton.Close),
-        )
-
-    def suppress_toggled(self):
-        if self.cb.isChecked():
-            Alert.suppressed_alerts.add(self.key)
-
-    def sizeHint(self):
-        ans = Dialog.sizeHint(self)
-        ans.setWidth(min(self.maximumWidth(), ans.width() + 150))
-        return ans
-
-
-# }}}
-
-
-def edit_text(viewref, text, frame_id, eid):  # {{{
-    defedit = os.environ.get("VISUAL", os.environ.get("EDITOR", "vim"))
-    defedit = "kitty " + defedit
-    editor = shlex.split(misc_config("editor", default=defedit))
-    with NamedTemporaryFile(prefix="vise-edit-file-", suffix=".txt", delete=False) as f:
-        f.write(text.encode("utf-8"))
-    try:
-        ret = subprocess.Popen(editor + [f.name]).wait()
-        if ret == 0:
-            with open(f.name, "rb") as f:
-                new_text = f.read().decode("utf-8")
-            if new_text != text:
-                view = viewref()
-                if view is not None:
-                    view.set_editable_text_in_gui_thread.emit(new_text, frame_id, eid)
-    finally:
-        os.remove(f.name)
-
-
-# }}}
-
-
-class WebPage(QWebEnginePage):
-    """Per-tab web page. Bridges JS<->Python via the title-token polling
-    loop (see vise/communicate.py for the full architecture).
-
-    ``poll_for_messages`` is emitted from ``on_title_change`` when JS
-    toggles ``document.title`` with the sentinel token. The handler
-    ``check_for_messages_from_js`` then fetches the JS message queue
-    via ``window.get_messages_from_javascript`` and dispatches each
-    entry to the registered Python handler.
-    """
-
-    poll_for_messages = pyqtSignal()
-
-    def __init__(self, profile, parent):
-        QWebEnginePage.__init__(self, profile, parent)
-        self.authenticationRequired.connect(self.authentication_required)
-        self.proxyAuthenticationRequired.connect(self.proxy_authentication_required)
-        self.callbacks = {"vise_downloads_page": (self.downloads_callback, (), {})}
-        self.poll_for_messages.connect(
-            self.check_for_messages_from_js, type=Qt.ConnectionType.QueuedConnection
-        )
-        self.certificateError.connect(self.on_certificate_error)
-
-    def register_callback(self, name, func, *args, **kw):
-        self.callbacks[name] = (func, args, kw)
-
-    def downloads_callback(self, *args, **kw):
-        return QApplication.instance().downloads.callback(*args, **kw)
-
-    def check_for_messages_from_js(self):
-        self.runJavaScript(
-            "try { window.get_messages_from_javascript() } catch(TypeError) {}",
-            QWebEngineScript.ScriptWorldId.ApplicationWorld,
-            self.messages_received_from_js,
-        )
-
-    def messages_received_from_js(self, messages):
-        if messages and messages != "[]":
-            for msg in json.loads(messages):
-                mtype = msg["type"]
-                if mtype == "callback":
-                    self.called_back(msg["name"], msg["data"])
-                elif mtype == "js_to_python":
-                    js_to_python(self, msg["name"], msg["args"])
-                else:
-                    print("Unknown message type %s received from javascript" % mtype)
-
-    def called_back(self, name, data):
-        try:
-            func, args, kw = self.callbacks[name]
-        except KeyError:
-            pass
-        else:
-            return func(self.parent(), data, *args, **kw)
-        raise KeyError("No callback named %r is registered" % name)
-
-    def javaScriptConsoleMessage(self, level, msg, linenumber, source_id):
-        try:
-            print("%s:%s: %s" % (source_id, linenumber, msg))
-        except OSError:
-            pass
-
-    def on_certificate_error(self, err):
-        code = err.type()
-        qurl = err.url()
-        domain = qurl.host()
-        if cert_exceptions.has_exception(domain, code):
-            certificate_error_domains.add(domain)
-            err.acceptCertificate()
-            return
-        if not err.isOverridable():
-            cert_exceptions.show_error(domain, err.description(), self.parent())
-            err.rejectCertificate()
-            return
-        err.defer()
-        allow = cert_exceptions.ask(domain, code, err.description(), self.parent())
-        if allow:
-            certificate_error_domains.add(domain)
-            err.acceptCertificate()
-        else:
-            err.rejectCertificate()
-
-    def authentication_required(self, qurl, authenticator):
-        get_http_auth_credentials(qurl, authenticator, parent=self.parent())
-
-    def proxy_authentication_required(self, qurl, authenticator, proxy_host):
-        get_proxy_auth_credentials(
-            qurl, authenticator, proxy_host, parent=self.parent()
-        )
-
-    def javaScriptAlert(self, qurl, msg):
-        key = qurl.toString()
-        if key in Alert.suppressed_alerts:
-            print("Suppressing alert from:", qurl.toString())
-            return
-        self.parent().raise_tab()
-        Alert(self.title(), qurl, msg, self.parent()).exec()
-
-    def break_cycles(self):
-        self.callbacks.clear()
-        for s in (
-            "authenticationRequired proxyAuthenticationRequired linkHovered permissionRequested"
-            " fullScreenRequested windowCloseRequested quotaRequested"
-            " audioMutedChanged certificateError"
-        ).split():
-            safe_disconnect(getattr(self, s))
-        # Without the next two lines we get a crash on exit with Qt 5.8.0
-        self.setParent(None)
-        self.deleteLater()
-
-    def acceptNavigationRequest(self, qurl, navtype, is_main_frame):
-        try:
-            places.on_visit(qurl, navtype, is_main_frame)
-        except Exception:
-            import traceback
-
-            traceback.print_exc()
-        return True
 
 
 class WebView(QWebEngineView):
@@ -327,7 +141,7 @@ class WebView(QWebEngineView):
             termination_type
             == QWebEnginePage.RenderProcessTerminationStatus.CrashedTerminationStatus
         ):
-            from .message_box import error_dialog
+            from ..message_box import error_dialog
 
             error_dialog(
                 self.parent(),
@@ -341,7 +155,7 @@ class WebView(QWebEngineView):
             termination_type
             == QWebEnginePage.RenderProcessTerminationStatus.AbnormalTerminationStatus
         ):
-            from .message_box import error_dialog
+            from ..message_box import error_dialog
 
             error_dialog(
                 self.parent(),
@@ -434,7 +248,7 @@ class WebView(QWebEngineView):
         ``_last_seen_title`` is updated only on real changes, so the
         next JS poll restores to the right value.
         """
-        from .settings import TITLE_TOKEN
+        from ..settings import TITLE_TOKEN
 
         if title == TITLE_TOKEN:
             try:
@@ -456,7 +270,7 @@ class WebView(QWebEngineView):
         self.title_changed.emit(title)
 
     def on_icon_changed(self, icon):
-        from .main import save_favicon
+        from ..main import save_favicon
         icurl = self.iconUrl()
         if not icon.isNull():
             save_favicon(icurl.toString(), icon_to_data(icon))
@@ -487,7 +301,9 @@ class WebView(QWebEngineView):
 
     @connect_signal("copy_to_clipboard")
     def copy_to_clipboard(self, text):
-        QApplication.clipboard().setText(text)
+        cb = QApplication.clipboard()
+        if cb is not None:
+            cb.setText(text)
 
     def permission_requested(self, p: QWebEnginePermission) -> None:
         if not p.isValid():
@@ -647,7 +463,7 @@ class WebView(QWebEngineView):
         self.runjs(func, callback=callback, world_id=world_id)
 
     def save_page(self, path=None):
-        from .downloads import save_page_path_map
+        from ..downloads import save_page_path_map
 
         self._page.triggerAction(QWebEnginePage.WebAction.SavePage)
         save_page_path_map[self.url().toString()] = path
@@ -657,15 +473,15 @@ class WebView(QWebEngineView):
             path = os.path.join(get_download_dir(), self.title())
         if not path.lower().endswith(".pdf"):
             path += ".pdf"
-        size = QPageSize(getattr(QPageSize, misc_config("paper_size", "A4")))
+        size = QPageSize(getattr(QPageSize, misc_config("paper_size", "A4") or "A4"))
         layout = QPageLayout(
             size,
             QPageLayout.Orientation.Portrait,
             QMarginsF(
-                float(misc_config("margin_left", 36)),
-                float(misc_config("margin_top", 36)),
-                float(misc_config("margin_right", 36)),
-                float(misc_config("margin_bottom", 36)),
+                float(misc_config("margin_left", 36) or 36),
+                float(misc_config("margin_top", 36) or 36),
+                float(misc_config("margin_right", 36) or 36),
+                float(misc_config("margin_bottom", 36) or 36),
             ),
         )
         self._page.printToPdf(partial(self.print_done, path), layout)
@@ -855,8 +671,8 @@ class WebView(QWebEngineView):
 
     @connect_signal()
     def edit_text(self, text, frame_id, eid):
-        ref = weakref.ref(self)
-        t = Thread(name="EditText", target=edit_text, args=(ref, text, frame_id, eid))
+        ref = _weakref(self)
+        t = Thread(name="EditText", target=_edit_text_fn, args=(ref, text, frame_id, eid))
         t.daemon = True
         t.start()
 
