@@ -19,8 +19,14 @@ export function isContentEditable(node) {
     return false;
 }
 
+// Blocklist of <input type="..."> values that are focusable but never
+// accept text editing. We only fall through to isContentEditable(node)
+// for these so an INPUT inside a contenteditable ancestor is still
+// treated as a text input (preserving the rapydscript behavior).
 const NON_TEXT_INPUT_TYPES = new Set([
     'hidden', 'image', 'button', 'reset', 'file', 'radio', 'submit',
+    'checkbox', 'color', 'range', 'date', 'datetime-local',
+    'month', 'week', 'time',
 ]);
 
 export function isTextInputNode(node) {
@@ -34,7 +40,10 @@ export function isTextInputNode(node) {
     if (name === 'INPUT') {
         const itype = (node.getAttribute('type') || '').toLowerCase();
         if (NON_TEXT_INPUT_TYPES.has(itype)) {
-            return false;
+            // For blocklisted input types, defer to the contenteditable
+            // ancestor check: a <input type="button"> inside a
+            // contenteditable parent is still a text-editing host.
+            return isContentEditable(node);
         }
         return textEditingAllowed(node);
     }
