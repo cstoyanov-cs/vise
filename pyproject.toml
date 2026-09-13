@@ -1,5 +1,5 @@
 [project]
-name = "vise"
+name = "vise-dev"
 version = "0.1.0"
 description = "A keyboard driven browser with tabs in a tree (QtWebEngine)."
 readme = "README.md"
@@ -35,7 +35,7 @@ dev = [
 # injected into every page load the entry point main.js directly.
 
 [project.scripts]
-vise = "vise.main:main"
+vise-dev = "vise.main:main"
 
 [project.urls]
 Upstream = "https://github.com/kovidgoyal/vise"

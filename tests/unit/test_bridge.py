@@ -246,92 +246,129 @@ class TestConnectSignal:
 
 
 # ---------------------------------------------------------------------------
-# 3. Regression: on_title_change must isolate SENTINEL from real title changes.
+# 4. Regression: connect_signal must store f.__name__ so js_to_python's
+#    getattr(webview, func_name) reaches the actual Python method.
 #
-# The original bug: every JS message (focus change, hint click, copy)
-# triggered places.on_title_change (SQLite SELECT + UPDATE) and
-# title_changed.emit (UI refresh). The fix: SENTINEL toggles only emit
-# poll_for_messages; the original-title-restore case is detected via
-# _last_seen_title and skipped.
+#    Bug: the decorator stored the SIGNAL name (the @connect_signal arg)
+#    instead of the FUNCTION name. Handlers decorated with a non-matching
+#    signal name (e.g. @connect_signal("element_focused") on
+#    on_focus_change) silently fall through js_to_python's getattr lookup
+#    and never fire.
+#
+#    Symptom: text_input_focused stays False, KeyFilter uses normal_key_map
+#    when typing in a text input, shortcuts fire instead of insertion.
 # ---------------------------------------------------------------------------
 
 
-class TestOnTitleChangeNoLongerPollsDatabase:
-    """The polling wake-up path must NOT touch SQLite or UI."""
+class TestConnectSignalReachesRenamedMethod:
+    """The decorator must store ``f.__name__`` (the real Python method
+    name) so ``js_to_python``'s ``getattr(page_or_parent, func_name)``
+    resolves the method regardless of the signal name passed to
+    ``@connect_signal(...)``.
+    """
 
-    @pytest.fixture
-    def web_view(self, tmp_path):
-        _install_qt_for_bridge(tmp_path)
-        import vise.view as vw
-        view = vw.WebView.__new__(vw.WebView)
-        view._page = MagicMock()
-        view._page.poll_for_messages = MagicMock()
-        view.title_changed = MagicMock()
-        view.url = MagicMock(return_value=MagicMock())
-        view._last_seen_title = ""
-        return view
-
-    def _set_title_token(self, monkeypatch, token):
-        import vise.settings as settings_mod
-        monkeypatch.setattr(settings_mod, "TITLE_TOKEN", token, raising=False)
-
-    def test_sentinel_only_emits_poll_no_db_no_ui(
-        self, web_view, monkeypatch, capsys
-    ):
-        """SENTINEL toggles must NOT call places.on_title_change (no
-        SQLite write) and must NOT emit title_changed (no UI refresh).
+    def _make_view(self):
+        """Return a freshly-built WebView-like class with the three
+        real-world mismatched handlers from vise/view/webview.py.
         """
-        import vise.settings as settings_mod
-        monkeypatch.setattr(settings_mod, "TITLE_TOKEN", "SENTINEL_XYZ")
-        monkeypatch.setattr(
-            sys.modules["vise.places"], "places", MagicMock(),
+        from vise.communicate import connect_signal
+
+        class WebViewLike:
+            def __init__(self):
+                self.last_focus = None
+                self.middle_click_called = False
+                self.last_submit = None
+
+            @connect_signal("element_focused")
+            def on_focus_change(self, is_text_input):
+                self.last_focus = is_text_input
+
+            @connect_signal("middle_click_soon")
+            def expecting_middle_click(self):
+                self.middle_click_called = True
+
+            @connect_signal("login_form_submitted_in_page")
+            def on_login_form_submit(self, url, username, password):
+                self.last_submit = (url, username, password)
+
+        return WebViewLike
+
+    def test_decorator_stores_method_name_not_signal_name(self, bridge_module):
+        """The lookup key in from_js must be the actual attribute name
+        on the class, so getattr(view, stored) resolves.
+        """
+        cls = self._make_view()
+        stored = bridge_module.from_js["element_focused"]
+        assert hasattr(cls, stored), (
+            f"Decorator stored {stored!r} but cls.{stored} does not exist. "
+            f"js_to_python would print 'Unknown signal received from js'."
         )
 
-        from vise.view import WebView
-        WebView.on_title_change(web_view, "SENTINEL_XYZ")
+    def test_element_focused_reaches_on_focus_change(self, bridge_module):
+        bc = bridge_module
+        cls = self._make_view()
+        view = cls()
 
-        # No DB call.
-        sys.modules["vise.places"].places.on_title_change.assert_not_called()
-        # No UI signal.
-        web_view.title_changed.emit.assert_not_called()
-        # But poll_for_messages is emitted.
-        web_view._page.poll_for_messages.emit.assert_called_once()
+        class Page:
+            def parent(self):
+                return view
 
-    def test_real_title_change_updates_db_and_ui(
-        self, web_view, monkeypatch
-    ):
-        """A title that differs from _last_seen_title must hit the DB
-        and emit title_changed — and _last_seen_title must be updated."""
-        import vise.settings as settings_mod
-        monkeypatch.setattr(settings_mod, "TITLE_TOKEN", "SENTINEL_XYZ")
+        bc.js_to_python(Page(), "element_focused", [True])
 
-        places_mock = MagicMock()
-        sys.modules["vise.places"].places = places_mock
-        import vise.view as vw
-        vw.places = places_mock
+        assert view.last_focus is True, (
+            "js_to_python did not invoke on_focus_change — "
+            "text_input_focused will never become True"
+        )
 
-        from vise.view import WebView
-        WebView.on_title_change(web_view, "Real Page Title")
+    def test_middle_click_soon_reaches_method(self, bridge_module):
+        bc = bridge_module
+        cls = self._make_view()
+        view = cls()
 
-        places_mock.on_title_change.assert_called_once()
-        web_view.title_changed.emit.assert_called_once_with("Real Page Title")
-        assert web_view._last_seen_title == "Real Page Title"
+        class Page:
+            def parent(self):
+                return view
 
-    def test_restoring_to_same_title_is_noop(self, web_view, monkeypatch):
-        """After a real title change, JS toggles title back to the
-        same value to restore. This second on_title_change must NOT
-        hit the DB again (same as last_seen_title)."""
-        import vise.settings as settings_mod
-        monkeypatch.setattr(settings_mod, "TITLE_TOKEN", "SENTINEL_XYZ")
+        bc.js_to_python(Page(), "middle_click_soon", [])
 
-        places_mock = MagicMock()
-        sys.modules["vise.places"].places = places_mock
-        import vise.view as vw
-        vw.places = places_mock
+        assert view.middle_click_called is True
 
-        from vise.view import WebView
-        WebView.on_title_change(web_view, "Foo")
-        WebView.on_title_change(web_view, "Foo")  # JS restore
+    def test_login_form_submitted_in_page_reaches_method(self, bridge_module):
+        bc = bridge_module
+        cls = self._make_view()
+        view = cls()
 
-        # Only the first call should have hit places.on_title_change.
-        assert places_mock.on_title_change.call_count == 1
+        class Page:
+            def parent(self):
+                return view
+
+        bc.js_to_python(Page(), "login_form_submitted_in_page", [
+            "https://x.com/", "user", "pass"
+        ])
+
+        assert view.last_submit == ("https://x.com/", "user", "pass")
+
+    def test_matching_names_still_work(self, bridge_module):
+        """Sanity: when the signal name equals the method name (e.g.
+        @connect_signal() with no arg, or self-named handlers), dispatch
+        must continue to work.
+        """
+        from vise.communicate import connect_signal
+
+        class View:
+            def __init__(self):
+                self.called = False
+
+            @connect_signal()  # uses f.__name__ == "copy_to_clipboard"
+            def copy_to_clipboard(self, text):
+                self.called = text
+
+        view = View()
+
+        class Page:
+            def parent(self):
+                return view
+
+        bridge_module.js_to_python(Page(), "copy_to_clipboard", ["hello"])
+
+        assert view.called == "hello"

@@ -104,6 +104,10 @@ def connect_signal(name=None, func_name=None):
         n = name or func_name or f.__name__
         if n in from_js:
             raise KeyError(f'A signal with the name of {n} has already been connected')
-        from_js[n] = n
+        # Store f.__name__ (the actual Python method attribute) so
+        # js_to_python's getattr(page_or_parent, func_name) resolves
+        # the method even when the signal name differs from the method
+        # name (e.g. @connect_signal('element_focused') on on_focus_change).
+        from_js[n] = f.__name__
         return f
     return connect

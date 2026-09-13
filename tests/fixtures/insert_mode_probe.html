@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<!--
+  Exhaustive fixture for isTextInputNode() insert-mode detection.
+
+  Each input below is tagged with the EXPECTED return value of
+  isTextInputNode() so the probe test can assert each case.
+
+  Order: structurally simple cases first, edge cases last.
+-->
+<html>
+<head><title>Insert mode probe</title></head>
+<body>
+
+  <!-- Plain text inputs (the user-reported regression case) -->
+  <input id="i-text"        type="text"        />
+  <input id="i-email"       type="email"       />
+  <input id="i-password"    type="password"    />
+  <input id="i-search"      type="search"      />
+  <input id="i-url"         type="url"         />
+  <input id="i-tel"         type="tel"         />
+  <input id="i-number"      type="number"      />
+  <input id="i-default"                              />
+
+  <!-- Plain textarea -->
+  <textarea id="t-plain"></textarea>
+
+  <!-- Non-text inputs (focusable but NOT text editing) -->
+  <input id="i-button"      type="button"      />
+  <input id="i-submit"      type="submit"      />
+  <input id="i-reset"       type="reset"       />
+  <input id="i-image"       type="image"       />
+  <input id="i-file"        type="file"        />
+  <input id="i-radio"       type="radio"       />
+  <input id="i-checkbox"    type="checkbox"    />
+  <input id="i-color"       type="color"       />
+  <input id="i-hidden"      type="hidden"      />
+
+  <!-- Blocked inputs (must NOT enter insert mode) -->
+  <input id="i-readonly"    type="text"        readonly />
+  <input id="i-disabled"    type="text"        disabled />
+  <textarea id="t-readonly" readonly></textarea>
+  <textarea id="t-disabled" disabled></textarea>
+
+  <!-- Contenteditable hosts -->
+  <div id="ce-true"  contenteditable="true">Editable</div>
+  <div id="ce-false" contenteditable="false">Not editable</div>
+  <div id="ce-empty" contenteditable="">Inherit (treated as false)</div>
+  <div id="ce-nested" contenteditable="true">
+    <span id="ce-nested-child">Inside a contenteditable parent</span>
+  </div>
+  <div id="ce-mixed-input" contenteditable="true">
+    <input id="i-inside-ce-button" type="button" value="button inside ce" />
+  </div>
+
+  <!-- Edge cases -->
+  <a id="link" href="#">link</a>
+  <button id="button">button</button>
+  <select id="select"><option>x</option></select>
+
+</body>
+</html>

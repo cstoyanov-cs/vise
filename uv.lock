@@ -604,7 +604,7 @@ wheels = [
 ]
 
 [[package]]
-name = "vise"
+name = "vise-dev"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
