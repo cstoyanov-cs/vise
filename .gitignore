@@ -39,3 +39,4 @@ MagicMock
 tests/js/node_modules/
 tests/js/coverage/
 tests/js/.babel-cache/
+.worktrees/
