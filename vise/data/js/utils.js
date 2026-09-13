@@ -50,7 +50,7 @@ export function isTextInputNode(node) {
     return isContentEditable(node);
 }
 
-export function isVisible(elem) {
+export function isVisible(elem, rect = null) {
     if (!elem || !elem.ownerDocument) {
         return false;
     }
@@ -58,7 +58,11 @@ export function isVisible(elem) {
     if (!win) {
         return false;
     }
-    const rect = elem.getBoundingClientRect();
+    // Use the passed rect if provided (saves a synchronous reflow when
+    // the caller already has the rect in hand). Otherwise compute it.
+    // ?? rather than || so a zero-size rect passed by the caller is
+    // honored, not re-fetched.
+    rect = rect ?? elem.getBoundingClientRect();
     if (
         !rect ||
         rect.bottom < 0 ||

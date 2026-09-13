@@ -59,8 +59,6 @@ _EXPORT_DECL_RE = re.compile(
 _EXPORT_VAR_RE = re.compile(r'^export\s+(const|let|var)\s+', re.MULTILINE)
 # export { a, b as c };
 _EXPORT_LIST_RE = re.compile(r'^export\s*\{[^}]*\}\s*;?\s*$', re.MULTILINE)
-# Leading "use strict" — kept (no harm) but a final one is enough.
-_DIRECTIVE_RE = re.compile(r'^[\'"]use strict[\'"];?\s*$', re.MULTILINE)
 
 
 def transform(source: str) -> str:

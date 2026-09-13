@@ -4,7 +4,7 @@
   "description": "JavaScript tests for Vise client modules",
   "scripts": {
     "test": "jest",
-    "test:coverage": "jest --coverage",
+    "test:coverage": "jest --coverage --collectCoverageFrom=/home/opencode/DEV/vise/.worktrees/vise-dev/vise/data/js/hints.js test/hints.test.js",
     "test:watch": "jest --watch"
   },
   "devDependencies": {
@@ -18,14 +18,20 @@
     "setupFiles": [
       "<rootDir>/test/setup.js"
     ],
-    "coverageDirectory": "coverage",
+    "coverageDirectory": "<rootDir>/coverage",
     "collectCoverageFrom": [
-      "client/**/*.js",
-      "test/**/*.js",
-      "!node_modules/**"
+      "/home/opencode/DEV/vise/.worktrees/vise-dev/vise/data/js/**/*.js"
     ],
+    "coverageThreshold": {
+      "/home/opencode/DEV/vise/.worktrees/vise-dev/vise/data/js/hints.js": {
+        "statements": 100,
+        "branches": 100,
+        "functions": 100,
+        "lines": 100
+      }
+    },
     "testMatch": [
-      "**/test/**/*.test.js"
+      "<rootDir>/test/**/*.test.js"
     ],
     "modulePathIgnorePatterns": [
       "<rootDir>/node_modules/"

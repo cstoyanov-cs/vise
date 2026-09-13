@@ -26,10 +26,13 @@ const ATTR = 'data-vise-hint';
 function reportError(label, err) {
     console.error('[hints] error in', label, err && (err.stack || err.message || err));
 }
-function safeHandler(label, fn) {
-    const wrapped = function (...args) {
+const safeHandler = (label, fn) => {
+    // Arrow function: non-constructable, so TS stops flagging the previous
+    // 'function' expression as a candidate class. None of the wrapped
+    // handlers rely on a call-site this, so the lexical binding is fine.
+    const wrapped = (...args) => {
         try {
-            return fn.apply(this, args);
+            return fn(...args);
         } catch (err) {
             reportError(label, err);
         }
@@ -37,10 +40,10 @@ function safeHandler(label, fn) {
     try {
         Object.defineProperty(wrapped, 'name', { value: fn.name, configurable: true });
     } catch {
-        // Some engines forbid redefining name; fall back to anonymous.
+        /* istanbul ignore next: jsdom/V8 keep function names configurable */
     }
     return wrapped;
-}
+};
 
 const currentRequest = {
     id: 0,
@@ -69,14 +72,14 @@ function startFollowLink(action) {
 }
 
 registerSubframeHandler(safeHandler('find_hints', function find_hints(
-    currentFrameId, sourceFrameId, sourceFrame, action, requestId,
+    currentFrameId, _sourceFrameId, sourceFrame, action, requestId,
 ) {
     const hints = markVisibleHints(action, currentFrameId);
     sendAction(sourceFrame, 'report_marked_hints', requestId, hints);
 }));
 
 registerTopHandler(safeHandler('report_marked_hints', function report_marked_hints(
-    currentFrameId, sourceFrameId, sourceFrame, requestId, hints,
+    _currentFrameId, _sourceFrameId, _sourceFrame, requestId, hints,
 ) {
     if (requestId !== currentRequest.id) return;
     currentRequest.numLeft -= 1;
@@ -87,6 +90,13 @@ registerTopHandler(safeHandler('report_marked_hints', function report_marked_hin
 function addHintMarkup(elem, i) {
     const tname = elem.tagName.toLowerCase();
     if (tname === 'input' || tname === 'textarea') {
+        // Drop any leftover marker from a prior markVisibleHints pass;
+        // otherwise repeated startFollowLink calls stack them in front of
+        // the same input.
+        const prev = elem.previousSibling;
+        if (prev && prev.tagName && prev.tagName.toLowerCase() === REPLACED_ELEM_TAG) {
+            prev.parentNode.removeChild(prev);
+        }
         const e = document.createElement(REPLACED_ELEM_TAG);
         elem.parentNode.insertBefore(e, elem);
         elem = e;
@@ -103,7 +113,7 @@ function removeHintMarkup(elem) {
         }
     } else {
         elem.removeAttribute(ATTR);
-        if (elem.tagName.toLowerCase() === REPLACED_ELEM_TAG) {
+        if (tname === REPLACED_ELEM_TAG) {
             elem.parentNode.removeChild(elem);
         }
     }
@@ -121,7 +131,7 @@ function markVisibleHints(action, frameId = 0) {
 
     for (const [i, elem] of allElems.entries()) {
         const br = elem.getBoundingClientRect();
-        if (isVisible(elem)) {
+        if (isVisible(elem, br)) {
             addHintMarkup(elem, i);
             hints.push({ frame_id: frameId, num: i, left: br.left, top: br.top });
         } else {
@@ -164,7 +174,7 @@ function updateHintNumbers(hintMap) {
 }
 
 registerSubframeHandler(safeHandler('hints_assigned', function hints_assigned(
-    currentFrameId, sourceFrameId, sourceFrame, hints,
+    _currentFrameId, _sourceFrameId, _sourceFrame, hints,
 ) {
     updateHintNumbers(hints);
 }));
@@ -191,7 +201,7 @@ function followLink(text) {
     }
     const hintGroups = {};
     const allHints = [];
-    for (const [i, hint] of currentRequest.allHints.entries()) {
+    for (const hint of currentRequest.allHints) {
         if (predicate(hint)) {
             hint.matched = true;
             allHints.push(hint);
@@ -274,7 +284,7 @@ function activateElem(elem) {
 }
 
 registerSubframeHandler(safeHandler('hints_filtered', function hints_filtered(
-    currentFrameId, sourceFrameId, sourceFrame, hints, foundTarget,
+    _currentFrameId, _sourceFrameId, _sourceFrame, hints, foundTarget,
 ) {
     updateFilteredHints(hints, foundTarget);
 }));
