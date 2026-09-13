@@ -16,10 +16,10 @@ from ..certs import cert_exceptions
 from ..communicate import js_to_python
 from ..places import places
 from ..utils import safe_disconnect
+from .alert import Alert
 
 certificate_error_domains: set[str] = set()
 
-from .alert import Alert
 
 
 class WebPage(QWebEnginePage):

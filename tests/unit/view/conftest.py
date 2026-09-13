@@ -105,6 +105,9 @@ class _FakeQWebEngineView(_FakeQWidget):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
+    def event(self, ev):
+        return False
+
 
 class _FakeQWebEnginePage(_FakeQObject):
     """Real (non-MagicMock) base class for ``WebPage(QWebEnginePage)``."""
@@ -119,6 +122,15 @@ class _FakeQWebEnginePage(_FakeQObject):
         ExitFullScreen = MagicMock(name="ExitFullScreen")
         SavePage = MagicMock(name="SavePage")
         InspectElement = MagicMock(name="InspectElement")
+
+    class Type:
+        ChildPolished = MagicMock(name="ChildPolished")
+        Show = MagicMock(name="Show")
+
+    class RenderProcessTerminationStatus:
+        CrashedTerminationStatus = MagicMock(name="Crashed")
+        AbnormalTerminationStatus = MagicMock(name="Abnormal")
+        NormalTerminationStatus = MagicMock(name="Normal")
 
     class FindFlag:
         FindBackward = MagicMock(name="FindBackward")
@@ -373,6 +385,7 @@ def web_view(view_module):
     view._page.scrollPosition = MagicMock(
         return_value=MagicMock(x=MagicMock(return_value=0), y=MagicMock(return_value=0))
     )
+    view.devicePixelRatioF = MagicMock(return_value=1.0)
     view._page.runJavaScript = MagicMock()
     view._page.triggerAction = MagicMock()
     view._page.printToPdf = MagicMock()
@@ -424,6 +437,7 @@ def make_view(view_module):
             "_dev_tools": None,
             "_last_seen_title": "",
             "_page": MagicMock(),
+            "devicePixelRatioF": MagicMock(return_value=1.0),
             "main_window": MagicMock(),
             "pending_unserialize": None,
             "middle_click_soon": 0,

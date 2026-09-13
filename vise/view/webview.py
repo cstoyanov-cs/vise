@@ -40,8 +40,9 @@ from itertools import count
 
 from .page import WebPage
 
-view_id = count()
 from .editor import edit_text as _edit_text_fn
+
+view_id = count()
 
 
 class WebView(QWebEngineView):
@@ -300,7 +301,9 @@ class WebView(QWebEngineView):
 
     @connect_signal("copy_to_clipboard")
     def copy_to_clipboard(self, text):
-        QApplication.clipboard().setText(text)
+        cb = QApplication.clipboard()
+        if cb is not None:
+            cb.setText(text)
 
     def permission_requested(self, p: QWebEnginePermission) -> None:
         if not p.isValid():

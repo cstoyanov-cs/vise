@@ -5,7 +5,6 @@
 import os
 import shlex
 import subprocess
-import weakref
 from tempfile import NamedTemporaryFile
 
 from ..config import misc_config
