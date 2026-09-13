@@ -39,3 +39,6 @@ MagicMock
 tests/js/node_modules/
 tests/js/coverage/
 tests/js/.babel-cache/
+
+# Generated test bundle (rebuilt by focus_dispatch.test.js via Python)
+tests/fixtures/_focus_dispatch_bundle.js
