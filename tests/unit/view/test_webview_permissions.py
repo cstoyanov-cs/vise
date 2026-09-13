@@ -50,6 +50,44 @@ class TestPermissionRequested:
         assert "audio" in kwargs_or_args.args[0].lower() or \
                "microphone" in kwargs_or_args.args[0].lower()
 
+    def test_callback_grants_when_user_accepts(self, web_view, view_module):
+        # Regression: the inner callback must call queryPermission() on
+        # the page profile and grant() the returned permission when the
+        # user accepts. Covers the path that was shadowed by an inner
+        # `p = ...` rebind before the rename.
+        view_module.webview.sip.isdeleted = MagicMock(return_value=False)
+        p = _stub_permission(web_view, feature_name="audio")
+        web_view.permission_requested(p)
+        callback = web_view.popup.call_args.args[1]
+        callback(True, False)
+        qperm = web_view._page.profile().queryPermission.return_value
+        web_view._page.profile().queryPermission.assert_called_once_with(
+            p.origin(), p.permissionType()
+        )
+        qperm.grant.assert_called_once()
+        qperm.deny.assert_not_called()
+
+    def test_callback_denies_when_user_rejects(self, web_view, view_module):
+        view_module.webview.sip.isdeleted = MagicMock(return_value=False)
+        p = _stub_permission(web_view, feature_name="audio")
+        web_view.permission_requested(p)
+        callback = web_view.popup.call_args.args[1]
+        callback(False, False)
+        qperm = web_view._page.profile().queryPermission.return_value
+        qperm.deny.assert_called_once()
+        qperm.grant.assert_not_called()
+
+    def test_callback_noop_during_shutdown(self, web_view, view_module):
+        # During shutdown we must not touch the page or profile — the
+        # sip-deleted checks guard this, and the callback returns
+        # without invoking queryPermission.
+        view_module.webview.sip.isdeleted = MagicMock(return_value=False)
+        p = _stub_permission(web_view, feature_name="audio")
+        web_view.permission_requested(p)
+        callback = web_view.popup.call_args.args[1]
+        callback(True, True)  # during_shutdown=True
+        web_view._page.profile().queryPermission.assert_not_called()
+
 
 # ---------------------------------------------------------------------------
 # quota_requested

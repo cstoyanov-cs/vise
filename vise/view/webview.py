@@ -44,6 +44,18 @@ from .editor import edit_text as _edit_text_fn
 
 view_id = count()
 
+# WebView signals (and underlying QObject signals) to disconnect on
+# destruction. Listed as a tuple at module scope so a stray whitespace
+# typo cannot produce an AttributeError at runtime — each item is one
+# self-contained identifier.
+_CYCLES_SIGNALS = (
+    "resized", "moved", "icon_changed", "loading_status_changed",
+    "link_hovered", "urlChanged", "iconChanged", "iconUrlChanged",
+    "renderProcessTerminated", "loadStarted", "loadFinished",
+    "window_close_requested", "focus_changed", "passthrough_changed",
+    "toggle_full_screen", "dev_tools_requested",
+)
+
 
 class WebView(QWebEngineView):
     icon_changed = pyqtSignal(object)
@@ -137,34 +149,29 @@ class WebView(QWebEngineView):
             }());""")
 
     def render_process_terminated(self, termination_type, exit_code):
-        if (
-            termination_type
-            == QWebEnginePage.RenderProcessTerminationStatus.CrashedTerminationStatus
-        ):
-            from ..message_box import error_dialog
-
-            error_dialog(
-                self.parent(),
-                _("Render process crashed"),
-                _(
-                    "The render process crashed while displaying the URL: {0} with exit code: {1}"
-                ).format(self.url().toString(), exit_code),
-                show=True,
+        status = QWebEnginePage.RenderProcessTerminationStatus
+        if termination_type == status.CrashedTerminationStatus:
+            self._show_render_crash_dialog(
+                "Render process crashed",
+                "The render process crashed while displaying the URL: {0} with exit code: {1}",
+                exit_code,
             )
-        elif (
-            termination_type
-            == QWebEnginePage.RenderProcessTerminationStatus.AbnormalTerminationStatus
-        ):
-            from ..message_box import error_dialog
-
-            error_dialog(
-                self.parent(),
-                _("Render process terminated"),
-                _(
-                    "The render process exited abnormally while displaying the URL: {0} with exit code: {1}"
-                ).format(self.url().toString(), exit_code),
-                show=True,
+        elif termination_type == status.AbnormalTerminationStatus:
+            self._show_render_crash_dialog(
+                "Render process terminated",
+                "The render process exited abnormally while displaying the URL: {0} with exit code: {1}",
+                exit_code,
             )
+
+    def _show_render_crash_dialog(self, title_key, message_key, exit_code):
+        from ..message_box import error_dialog
+
+        error_dialog(
+            self.parent(),
+            _(title_key),
+            _(message_key).format(self.url().toString(), exit_code),
+            show=True,
+        )
 
     @property
     def dev_tools(self):
@@ -334,11 +341,14 @@ class WebView(QWebEngineView):
                 and not sip.isdeleted(self._page)
                 and (profile := self._page.profile())
             ):
-                p = profile.queryPermission(origin, feature)
+                # Rename inner `p` → `qperm` so it doesn't shadow the outer
+                # `p` (the QWebEnginePermission request) — bug trap for the
+                # next contributor who reads this closure.
+                qperm = profile.queryPermission(origin, feature)
                 if ok:
-                    p.grant()
+                    qperm.grant()
                 else:
-                    p.deny()
+                    qperm.deny()
 
         self.popup(
             _("Grant the site {0} access to your <b>{1}</b>?").format(
@@ -404,10 +414,7 @@ class WebView(QWebEngineView):
         self.callback_on_save_edit_text_node = None
         self.popup.break_cycles()
         self._page.break_cycles()
-        for s in (
-            "resized moved icon_changed loading_status_changed link_hovered urlChanged iconChanged iconUrlChanged renderProcessTerminated"
-            " loadStarted loadFinished window_close_requested focus_changed passthrough_changed toggle_full_screen dev_tools_requested"
-        ).split():
+        for s in _CYCLES_SIGNALS:
             safe_disconnect(getattr(self, s))
 
     def create_page(self, profile):
@@ -521,12 +528,12 @@ class WebView(QWebEngineView):
         else:
             QApplication.instance().store_password(url, username, password)
 
-    @connect_signal()
-    def login_form_found_in_page(self, url):
-        self.on_login_form_found(url, True)
-
-    @connect_signal()
-    def url_for_current_login_form(self, url):
+    @connect_signal("login_form_found_in_page")
+    @connect_signal("url_for_current_login_form")
+    def _handle_login_signal(self, url):
+        # Single handler for both JS signals — identical body, so no
+        # point duplicating the method. Two decorators register the
+        # same Python method under both signal names in from_js.
         self.on_login_form_found(url, True)
 
     def get_login_credentials(self, url):
