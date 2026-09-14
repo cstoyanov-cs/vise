@@ -27,6 +27,7 @@ import { jest } from '@jest/globals';
 jest.mock('../../../vise/data/js/frames.js', () => {
     const subframeHandlers = {};
     const topHandlers = {};
+    const registeredFrames = new WeakSet();
     return {
         __esModule: true,
         frameIter: jest.fn(() => []),
@@ -41,6 +42,9 @@ jest.mock('../../../vise/data/js/frames.js', () => {
         isPostableWindow: jest.fn((w) => (
             w != null && typeof w === 'object' && typeof w.postMessage === 'function'
         )),
+        isRegisteredFrame: jest.fn((w) => registeredFrames.has(w)),
+        __registerFrame: (w) => registeredFrames.add(w),
+        __unregisterFrame: (w) => registeredFrames.delete(w),
         __subframeHandlers: subframeHandlers,
         __topHandlers: topHandlers,
     };
@@ -123,6 +127,18 @@ describe('hints.js: markVisibleHints', () => {
         startFollowLink('copy');
         expect(labeledElements()).toHaveLength(2);
         expect(document.querySelector('button').hasAttribute(ATTR)).toBe(false);
+    });
+
+    test('[data-spm-anchor-id] divs are detected (AliExpress analytics attribute)', () => {
+        // AliExpress wraps clickable icons in <div data-spm-anchor-id="...">
+        // without any other interactive attribute (role, tabindex, onclick).
+        document.body.innerHTML =
+            '<div data-spm-anchor-id="a2g0o.home.0.i3.2eebf0c9jgR4Kz" id="d1"></div>';
+        setRect(document.getElementById('d1'), 10);
+        loadHints();
+        startFollowLink();
+        expect(labeledElements()).toHaveLength(1);
+        expect(document.getElementById('d1').getAttribute(ATTR)).toBe('0');
     });
 });
 
@@ -230,7 +246,7 @@ describe('hints.js: accumulatedKeypresses', () => {
 describe('hints.js: cross-origin deadlock (regression)', () => {
     test('non-postable frames do not block progress or trigger a broadcast', () => {
         // A frame with no postMessage method — the shape of a cross-origin
-        // Window proxy.
+        // Window proxy whose postMessage proxy has been revoked.
         const crossOriginFrame = { frames: [] };
         frames.frameIter.mockReturnValue([crossOriginFrame]);
         buildPage('<a href="#">A</a>');
@@ -244,6 +260,73 @@ describe('hints.js: cross-origin deadlock (regression)', () => {
             type: 'js_to_python', name: 'link_followed', args: [true, '0'],
         });
         expect(frames.broadcastAction).not.toHaveBeenCalled();
+    });
+
+    test('postable but unregistered (real cross-origin) frames do not block progress', () => {
+        // Real cross-origin iframes DO have postMessage (it's a Window
+        // method) but their JS context is inaccessible from this origin —
+        // isPostableWindow lets them through but no find_hints handler
+        // exists to reply. Counting them in numLeft deadlocks
+        // markingDone: every keypress piles up in
+        // accumulatedKeypresses and |escape is swallowed.
+        const crossOriginFrame = { postMessage: () => {}, frames: [] };
+        frames.frameIter.mockReturnValue([crossOriginFrame]);
+        // The frame is NOT registered (it never sent *register because it
+        // runs a different origin's JS).
+        buildPage('<a href="#">A</a>');
+        loadHints();
+        startFollowLink();
+        // assignHints must run synchronously (no broadcast either, since
+        // there is no responsive frame to broadcast to).
+        expect(frames.broadcastAction).not.toHaveBeenCalled();
+        followLink('0');
+        const msgs = drainMessages();
+        expect(msgs).toContainEqual({
+            type: 'js_to_python', name: 'link_followed', args: [true, '0'],
+        });
+    });
+
+    test('postable registered frames broadcast find_hints and wait', () => {
+        // A same-origin iframe that HAS loaded vise-client.js and
+        // registered itself. We count it in numLeft, broadcast find_hints
+        // to it, and stay in !markingDone state until its report.
+        const sameOriginFrame = { postMessage: () => {}, frames: [] };
+        frames.frameIter.mockReturnValue([sameOriginFrame]);
+        frames.__registerFrame(sameOriginFrame);
+        buildPage('<a href="#">A</a>');
+        loadHints();
+        startFollowLink();
+        expect(frames.broadcastAction).toHaveBeenCalledTimes(1);
+        expect(frames.broadcastAction).toHaveBeenCalledWith(
+            [sameOriginFrame],
+            expect.stringContaining('find_hints'),
+            expect.anything(),
+            expect.anything(),
+        );
+        // Before the report, markingDone is false; user keypress
+        // accumulates and link_followed is NOT emitted yet.
+        followLink('0');
+        expect(drainMessages().find((m) => m.name === 'link_followed')).toBeUndefined();
+    });
+
+    test('timeout fallback forces assignHints when registered frames do not respond', () => {
+        jest.useFakeTimers();
+        const sameOriginFrame = { postMessage: () => {}, frames: [] };
+        frames.frameIter.mockReturnValue([sameOriginFrame]);
+        frames.__registerFrame(sameOriginFrame);
+        buildPage('<a href="#">A</a>');
+        loadHints();
+        startFollowLink();
+        // The frame never replies (no report_marked_hints dispatched).
+        followLink('0');
+        expect(drainMessages().find((m) => m.name === 'link_followed')).toBeUndefined();
+        // After the safety timeout, accumulated keypresses are replayed.
+        jest.runAllTimers();
+        const msgs = drainMessages();
+        expect(msgs).toContainEqual({
+            type: 'js_to_python', name: 'link_followed', args: [true, '0'],
+        });
+        jest.useRealTimers();
     });
 });
 
@@ -399,18 +482,28 @@ describe('hints.js: hintsOnload', () => {
         }
         // No <style> was injected into <head>.
         expect(document.head.querySelector('style')).toBeNull();
-        // The signals were never registered, so sending should throw because
-        // the handler isn't a function (fromPython[name] is undefined).
-        expect(() => window.send_message_to_javascript('start_follow_link', ['sametab']))
-            .toThrow();
+        // The signals were never registered, so dispatching them drops
+        // silently with a console.warn (rather than throwing — see
+        // communicate.js defensive check).
+        const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+        window.send_message_to_javascript('start_follow_link', ['sametab']);
+        expect(warnSpy).toHaveBeenCalled();
+        warnSpy.mockRestore();
     });
 
-    test('injects the hint CSS into <body>', () => {
+    test('mounts the hint overlay lazily and styles labels inline', () => {
+        // No <style> tag is injected: overlay labels use inline styles,
+        // which avoids polluting the host page with global rules.
         loadHints();
-        const style = document.body.querySelector('style');
-        expect(style).not.toBeNull();
-        expect(style.textContent).toContain('data-vise-hint');
-        expect(style.textContent).toContain('khaki');
+        expect(document.body.querySelector('style')).toBeNull();
+        expect(document.getElementById('vise-hint-overlay')).toBeNull();
+        buildPage('<a href="#">A</a>');
+        startFollowLink();
+        const label = document.querySelector('.vise-hint-label');
+        expect(label).not.toBeNull();
+        // Inline styles carry the configured colors.
+        expect(label.style.background).toBe('khaki');
+        expect(label.style.color).toBe('black');
     });
 });
 
@@ -659,12 +752,14 @@ describe('hints.js: coverage — defensive branches', () => {
     });
 
     test('assignHints is NOT called when numLeft remains >= 1', () => {
-        // Line 84 false branch: 2 postable frames, only 1 reports back
-        // before the test ends. numLeft goes from 2 to 1, the if check
-        // 1 < 1 is false, assignHints is skipped.
+        // Line 84 false branch: 2 postable registered frames, only 1
+        // reports back before the test ends. numLeft goes from 2 to 1,
+        // the < 1 check is false, assignHints is skipped.
         const frame1 = { postMessage: () => {}, frames: [] };
         const frame2 = { postMessage: () => {}, frames: [] };
         frames.frameIter.mockReturnValue([frame1, frame2]);
+        frames.__registerFrame(frame1);
+        frames.__registerFrame(frame2);
         buildPage('<a href="#">A</a>');
         loadHints();
         startFollowLink(); // broadcasts find_hints to both frames
@@ -729,9 +824,13 @@ describe('hints.js: coverage — defensive branches', () => {
             Object.defineProperty(window, 'self', { configurable: true, value: realSelf });
             Object.defineProperty(window, 'top', { configurable: true, value: realTop });
         }
-        // The signals were not registered, so dispatching them throws.
-        expect(() => window.send_message_to_javascript('start_follow_link', ['sametab']))
-            .toThrow();
+        // The signals were not registered, so dispatching them drops
+        // silently with a console.warn (rather than throwing — see
+        // communicate.js defensive check).
+        const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+        window.send_message_to_javascript('start_follow_link', ['sametab']);
+        expect(warnSpy).toHaveBeenCalled();
+        warnSpy.mockRestore();
     });
 });
 
@@ -778,6 +877,497 @@ describe('hints.js: layout-thrash regression', () => {
         });
         loadHints();
         startFollowLink();
-        expect(calls).toHaveLength(3);
+        // Two phases call getBoundingClientRect: markVisibleHints for
+        // visibility, and renderOverlay to position the label. Both phases
+        // happen once per element, in two separate functions (not inside
+        // the same tight loop — which is the bug this guard catches).
+        expect(calls).toHaveLength(6);
+        // The two phases are distinct: counts in interleaved order.
+        expect(calls.filter((c) => c === 'A#a')).toHaveLength(2);
+    });
+});
+
+// =====================================================================
+// ARIA / framework selector coverage
+// =====================================================================
+
+describe('hints.js: selector — ARIA / framework coverage', () => {
+    function tagAndGet(html, id) {
+        document.body.innerHTML = html;
+        setRect(document.getElementById(id), 10);
+        loadHints();
+        startFollowLink();
+        return document.getElementById(id).getAttribute(ATTR);
+    }
+
+    test('[aria-haspopup] is matched', () => {
+        expect(tagAndGet('<div id="d" aria-haspopup="true">menu</div>', 'd')).toBe('0');
+    });
+
+    test('[aria-expanded] is matched', () => {
+        expect(tagAndGet('<button id="b" aria-expanded="false">x</button>', 'b')).toBe('0');
+    });
+
+    test('[role=combobox] is matched', () => {
+        expect(tagAndGet('<div id="c" role="combobox">combo</div>', 'c')).toBe('0');
+    });
+
+    test('[role=menu] is matched', () => {
+        expect(tagAndGet('<div id="m" role="menu">menu container</div>', 'm')).toBe('0');
+    });
+
+    test('[role=option] is matched', () => {
+        expect(tagAndGet('<div id="o" role="option">option</div>', 'o')).toBe('0');
+    });
+
+    test('[role=switch] is matched', () => {
+        expect(tagAndGet('<div id="s" role="switch">toggle</div>', 's')).toBe('0');
+    });
+
+    test('<summary> is matched', () => {
+        expect(tagAndGet('<details><summary id="s">details</summary></details>', 's')).toBe('0');
+    });
+});
+
+
+// =====================================================================
+// activateElem: click interactive roles instead of just focusing
+// =====================================================================
+
+describe('hints.js: activateElem — interactive roles', () => {
+    beforeEach(() => jest.useFakeTimers());
+    afterEach(() => jest.useRealTimers());
+
+    test('<div role="button"> is clicked (not just focused)', () => {
+        document.body.innerHTML = '<div id="d" role="button" tabindex="0">menu</div>';
+        setRect(document.getElementById('d'), 10);
+        loadHints();
+        startFollowLink();
+        const clickSpy = jest.spyOn(document.getElementById('d'), 'click');
+        const focusSpy = jest.spyOn(document.getElementById('d'), 'focus');
+        followLink('0');
+        jest.advanceTimersByTime(300);
+        expect(clickSpy).toHaveBeenCalledTimes(1);
+        expect(focusSpy).toHaveBeenCalledTimes(1);
+    });
+
+    test('<div role="link"> is clicked', () => {
+        document.body.innerHTML = '<div id="d" role="link" tabindex="0">link</div>';
+        setRect(document.getElementById('d'), 10);
+        loadHints();
+        startFollowLink();
+        const clickSpy = jest.spyOn(document.getElementById('d'), 'click');
+        followLink('0');
+        jest.advanceTimersByTime(300);
+        expect(clickSpy).toHaveBeenCalledTimes(1);
+    });
+
+    test('<div role="menuitem"> is clicked', () => {
+        document.body.innerHTML = '<div id="d" role="menuitem">item</div>';
+        setRect(document.getElementById('d'), 10);
+        loadHints();
+        startFollowLink();
+        const clickSpy = jest.spyOn(document.getElementById('d'), 'click');
+        followLink('0');
+        jest.advanceTimersByTime(300);
+        expect(clickSpy).toHaveBeenCalledTimes(1);
+    });
+
+    test('element with inline [onclick] is clicked', () => {
+        document.body.innerHTML = '<div id="d" onclick="void 0">click</div>';
+        setRect(document.getElementById('d'), 10);
+        loadHints();
+        startFollowLink();
+        const clickSpy = jest.spyOn(document.getElementById('d'), 'click');
+        followLink('0');
+        jest.advanceTimersByTime(300);
+        expect(clickSpy).toHaveBeenCalledTimes(1);
+    });
+
+    test('element with [aria-haspopup] is clicked', () => {
+        document.body.innerHTML = '<div id="d" aria-haspopup="true">menu</div>';
+        setRect(document.getElementById('d'), 10);
+        loadHints();
+        startFollowLink();
+        const clickSpy = jest.spyOn(document.getElementById('d'), 'click');
+        followLink('0');
+        jest.advanceTimersByTime(300);
+        expect(clickSpy).toHaveBeenCalledTimes(1);
+    });
+
+    test('element with [aria-expanded] is clicked', () => {
+        document.body.innerHTML = '<div id="d" aria-expanded="false">x</div>';
+        setRect(document.getElementById('d'), 10);
+        loadHints();
+        startFollowLink();
+        const clickSpy = jest.spyOn(document.getElementById('d'), 'click');
+        followLink('0');
+        jest.advanceTimersByTime(300);
+        expect(clickSpy).toHaveBeenCalledTimes(1);
+    });
+
+    test('plain <div> with tabindex but no role is focused only (no spurious click)', () => {
+        // tabindex alone is not enough to assume clickability; <div tabindex="0">
+        // is commonly used for focus targets that have no click semantics.
+        document.body.innerHTML = '<div id="d" tabindex="0">focusable</div>';
+        setRect(document.getElementById('d'), 10);
+        loadHints();
+        startFollowLink();
+        const clickSpy = jest.spyOn(document.getElementById('d'), 'click');
+        const focusSpy = jest.spyOn(document.getElementById('d'), 'focus');
+        followLink('0');
+        jest.advanceTimersByTime(300);
+        expect(focusSpy).toHaveBeenCalledTimes(1);
+        expect(clickSpy).not.toHaveBeenCalled();
+    });
+});
+
+
+// =====================================================================
+// mouseover dispatch (hover-driven dropdowns)
+// =====================================================================
+
+describe('hints.js: activateElem — aria-expanded dropdown retry', () => {
+    beforeEach(() => jest.useFakeTimers());
+    afterEach(() => jest.useRealTimers());
+
+    test('keydown Enter is dispatched as fallback when aria-expanded did not toggle', () => {
+        // AliExpress-style dropdown: a div with role="button" and
+        // aria-expanded="false". Some React event systems silently
+        // drop our synthetic mouse/pointer sequence (onPointerDownCapture
+        // listeners, isTrusted checks, etc.). If aria-expanded hasn't
+        // changed after the click sequence, dispatch keydown Enter on
+        // the focused element — most React button-like components
+        // handle Enter as activation.
+        document.body.innerHTML =
+            '<div id="d" role="button" aria-expanded="false" tabindex="0">menu</div>';
+        setRect(document.getElementById('d'), 10, 20, 100, 30);
+        loadHints();
+        startFollowLink();
+        const d = document.getElementById('d');
+        const seen = [];
+        d.addEventListener('keydown', (e) => seen.push({ key: e.key, view: e.view === window }));
+        d.addEventListener('keyup', (e) => seen.push({ key: e.key, view: e.view === window }));
+        // Simulate a React component that ONLY reacts to Enter (ignores
+        // the synthetic mouse sequence entirely): toggle aria-expanded
+        // on keydown Enter.
+        d.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') d.setAttribute('aria-expanded', 'true');
+        });
+        followLink('0');
+        // Right after followLink, aria-expanded is still false.
+        expect(d.getAttribute('aria-expanded')).toBe('false');
+        // Advance past the 50ms retry delay.
+        jest.advanceTimersByTime(50);
+        expect(d.getAttribute('aria-expanded')).toBe('true');
+        expect(seen.some((s) => s.key === 'Enter')).toBe(true);
+    });
+
+    test('no keydown Enter retry when aria-expanded toggled by the click', () => {
+        // If the synthetic click sequence succeeded (aria-expanded
+        // flipped to true), the retry must NOT fire — dispatching a
+        // second activation would double-trigger the handler.
+        document.body.innerHTML =
+            '<div id="d" role="button" aria-expanded="false" tabindex="0">menu</div>';
+        setRect(document.getElementById('d'), 10, 20, 100, 30);
+        loadHints();
+        startFollowLink();
+        const d = document.getElementById('d');
+        let keydownCount = 0;
+        d.addEventListener('keydown', () => { keydownCount += 1; });
+        // Toggle on click — click handler that React would normally run.
+        d.addEventListener('click', () => d.setAttribute('aria-expanded', 'true'));
+        followLink('0');
+        expect(d.getAttribute('aria-expanded')).toBe('true');
+        jest.advanceTimersByTime(50);
+        expect(keydownCount).toBe(0);
+    });
+
+    test('no retry when element has no aria-expanded (plain button)', () => {
+        // Plain interactive element (no dropdown semantics): no keydown
+        // retry, just the normal click sequence.
+        document.body.innerHTML = '<button id="b">go</button>';
+        setRect(document.getElementById('b'), 10);
+        loadHints();
+        startFollowLink();
+        const b = document.getElementById('b');
+        let keydownCount = 0;
+        b.addEventListener('keydown', () => { keydownCount += 1; });
+        followLink('0');
+        jest.advanceTimersByTime(100);
+        expect(keydownCount).toBe(0);
+    });
+});
+
+describe('hints.js: activateElem — mouseover dispatch', () => {
+    beforeEach(() => jest.useFakeTimers());
+    afterEach(() => jest.useRealTimers());
+
+    function captureEvents(elem) {
+        const events = [];
+        for (const type of ['mouseover', 'mouseenter', 'click']) {
+            elem.addEventListener(type, (e) => events.push(type));
+        }
+        return events;
+    }
+
+    test('<a> animateClick (sametab) dispatches mouseover before click', () => {
+        document.body.innerHTML = '<a href="#" id="a">A</a>';
+        setRect(document.getElementById('a'), 10);
+        loadHints();
+        startFollowLink('sametab');
+        const events = captureEvents(document.getElementById('a'));
+        followLink('0');
+        jest.advanceTimersByTime(300);
+        // mouseover dispatched; elem.click() synthesizes click.
+        expect(events).toContain('mouseover');
+        expect(events).toContain('click');
+    });
+
+    test('<div role="button"> activateElem dispatches mouseover before click', () => {
+        document.body.innerHTML = '<div id="d" role="button">menu</div>';
+        setRect(document.getElementById('d'), 10);
+        loadHints();
+        startFollowLink();
+        const events = captureEvents(document.getElementById('d'));
+        followLink('0');
+        jest.advanceTimersByTime(300);
+        expect(events).toContain('mouseover');
+        expect(events).toContain('click');
+    });
+
+    test('activateElem on <div role="button"> dispatches full pointer+mouse sequence', () => {
+        // React listens to PointerEvent as well as MouseEvent. A click
+        // without mousedown/pointerdown is silently dropped by React 18+'s
+        // event system on some components (e.g. AliExpress dropdown).
+        document.body.innerHTML = '<div id="d" role="button">menu</div>';
+        setRect(document.getElementById('d'), 10, 20, 100, 30);
+        loadHints();
+        startFollowLink();
+        const seen = [];
+        const d = document.getElementById('d');
+        const w = d.ownerDocument.defaultView;
+        for (const t of ['pointerover', 'pointerdown', 'pointerup',
+                         'mouseover', 'mousedown', 'mouseup', 'click']) {
+            d.addEventListener(t, (e) => seen.push({t, view: e.view === w, x: e.clientX}));
+        }
+        followLink('0');
+        jest.advanceTimersByTime(300);
+        const types = seen.map((s) => s.t);
+        // Full mouse sequence: hover, press, release, click.
+        expect(types).toContain('mouseover');
+        expect(types).toContain('mousedown');
+        expect(types).toContain('mouseup');
+        expect(types).toContain('click');
+        // Every event carries `view: window` so React's synthetic event
+        // system can correlate them. (jsdom does not preserve clientX/Y
+        // through MouseEventInit, but real browsers do — verified manually
+        // by inspecting dispatched events.)
+        for (const s of seen) {
+            expect(s.view).toBe(true);
+        }
+        // Pointer events fire alongside mouse events so modern React apps
+        // that listen to PointerEvent also pick up the activation.
+        if (typeof PointerEvent === 'function') {
+            expect(types).toContain('pointerover');
+            expect(types).toContain('pointerdown');
+            expect(types).toContain('pointerup');
+        }
+    });
+});
+
+
+// =====================================================================
+// Overlay rendering
+// =====================================================================
+
+describe('hints.js: overlay rendering', () => {
+    test('after assignHints, an overlay with one label per hint is created', () => {
+        buildPage('<a href="#">A</a><a href="#">B</a><a href="#">C</a>');
+        loadHints();
+        startFollowLink();
+        const overlay = document.getElementById('vise-hint-overlay');
+        expect(overlay).not.toBeNull();
+        expect(overlay.parentElement).toBe(document.body);
+        expect(overlay.querySelectorAll('.vise-hint-label')).toHaveLength(3);
+        const labels = Array.from(overlay.querySelectorAll('.vise-hint-label'))
+            .map((n) => n.textContent).sort();
+        expect(labels).toEqual(['0', '1', '2']);
+    });
+
+    test('overlay labels are positioned via getBoundingClientRect of tagged elements', () => {
+        document.body.innerHTML =
+            '<a href="#" id="a">A</a><a href="#" id="b">B</a>';
+        setRect(document.getElementById('a'), 10, 20);
+        setRect(document.getElementById('b'), 50, 80);
+        loadHints();
+        startFollowLink();
+        const labels = Array.from(document.querySelectorAll('.vise-hint-label'));
+        // Labels are children of the overlay; their `left`/`top` are inline styles.
+        const positions = labels.map((l) => ({
+            left: parseFloat(l.style.left),
+            top: parseFloat(l.style.top),
+        })).sort((p, q) => p.top - q.top);
+        expect(positions[0]).toEqual({ left: 20, top: 10 });
+        expect(positions[1]).toEqual({ left: 80, top: 50 });
+    });
+
+    test('overlay covers the viewport so label shrink-to-fit is non-zero', () => {
+        // Regression: the overlay used to be width:0;height:0, which made
+        // absolute children's containing block zero-size → shrink-to-fit
+        // collapsed to 0px wide. Labels were in the DOM but invisible
+        // (Discord bug).
+        //
+        // jsdom can't fully layout absolute children of a viewport-covering
+        // fixed parent, so we assert the *inline style* the implementation
+        // sets on the overlay — that's what real browsers honor.
+        document.body.innerHTML = '<a href="#" id="a" tabindex="-1">wide</a>';
+        setRect(document.getElementById('a'), 10, 50, 240, 32);
+        loadHints();
+        startFollowLink();
+        const overlay = document.getElementById('vise-hint-overlay');
+        expect(overlay).not.toBeNull();
+        expect(overlay.style.position).toBe('fixed');
+        expect(overlay.style.top).toBe('0px');
+        expect(overlay.style.right).toBe('0px');
+        expect(overlay.style.bottom).toBe('0px');
+        expect(overlay.style.left).toBe('0px');
+        // No explicit width/height — they would force a synchronous layout.
+        expect(overlay.style.width).toBe('');
+        expect(overlay.style.height).toBe('');
+        // Labels themselves don't have an explicit width either, so they
+        // shrink-to-fit (jsdom can't measure this; we trust the browser).
+        const label = document.querySelector('.vise-hint-label');
+        expect(label.style.width).toBe('');
+        expect(label.style.left).toBe('50px');
+        expect(label.style.top).toBe('10px');
+    });
+
+    test('overlay labels use configured hint colors', () => {
+        buildPage('<a href="#">A</a>');
+        loadHints();
+        startFollowLink();
+        const label = document.querySelector('.vise-hint-label');
+        expect(label.style.background).toBe('khaki');
+        expect(label.style.color).toBe('black');
+    });
+
+    test('overlay labels do not inherit line-height (no overflow past link bottom)', () => {
+        // Regression: <span> defaults to line-height:normal (~1.2x font-size),
+        // which made the label taller than the link it tagged. The label's
+        // yellow box extended past the link's bottom and visually covered
+        // the next link in the list. Pinning line-height:1 keeps the label
+        // exactly font-size + padding + border tall.
+        buildPage('<a href="#">A</a>');
+        loadHints();
+        startFollowLink();
+        const label = document.querySelector('.vise-hint-label');
+        expect(label.style.lineHeight).toBe('1');
+        expect(label.style.display).toBe('inline-block');
+        expect(label.style.maxWidth).toBe('fit-content');
+    });
+
+    test('|escape removes all labels and the overlay', () => {
+        buildPage('<a href="#">A</a><a href="#">B</a>');
+        loadHints();
+        startFollowLink();
+        expect(document.querySelectorAll('.vise-hint-label').length).toBe(2);
+        followLink('|escape');
+        expect(document.querySelectorAll('.vise-hint-label').length).toBe(0);
+        expect(document.getElementById('vise-hint-overlay')).toBeNull();
+    });
+
+    test('repeat startFollowLink replaces overlay contents (no accumulation)', () => {
+        buildPage('<a href="#">A</a>');
+        loadHints();
+        startFollowLink();
+        expect(document.querySelectorAll('.vise-hint-label')).toHaveLength(1);
+        startFollowLink();
+        expect(document.querySelectorAll('.vise-hint-label')).toHaveLength(1);
+    });
+
+    test('labels off-viewport are not rendered', () => {
+        document.body.innerHTML = '<a href="#" id="a">A</a>';
+        setRect(document.getElementById('a'), -1000, 0); // above viewport
+        loadHints();
+        startFollowLink();
+        expect(document.querySelectorAll('.vise-hint-label')).toHaveLength(0);
+    });
+
+    test('filtering updates the overlay (only matched hint keeps a label)', () => {
+        buildPage('<a href="#">A</a><a href="#">B</a>');
+        loadHints();
+        startFollowLink();
+        // Type a single letter that fully matches the first hint.
+        followLink('0');
+        // The matched hint activated, the other was filtered out.
+        expect(document.querySelectorAll('.vise-hint-label').length).toBe(0);
+    });
+
+    test('hintsOnload does not inject a <style> element (labels use inline styles)', () => {
+        loadHints();
+        // No <style> tag in body: overlay labels are styled inline.
+        expect(document.body.querySelector('style')).toBeNull();
+    });
+});
+
+
+// =====================================================================
+// Overlay repositioning on scroll / resize
+// =====================================================================
+
+describe('hints.js: overlay repositioning', () => {
+    beforeEach(() => {
+        jest.useFakeTimers();
+    });
+    afterEach(() => {
+        jest.useRealTimers();
+    });
+
+    test('scroll event triggers label repositioning', () => {
+        document.body.innerHTML = '<a href="#" id="a">A</a>';
+        setRect(document.getElementById('a'), 100, 50);
+        loadHints();
+        startFollowLink();
+        expect(parseFloat(document.querySelector('.vise-hint-label').style.top)).toBe(100);
+        // Simulate a scroll that moves the link.
+        setRect(document.getElementById('a'), 30, 50);
+        window.dispatchEvent(new Event('scroll'));
+        // The handler uses requestAnimationFrame to coalesce bursts of
+        // scroll events; fake timers let us flush it synchronously.
+        jest.runAllTimers();
+        // The label element is replaced by re-render — re-query.
+        expect(parseFloat(document.querySelector('.vise-hint-label').style.top)).toBe(30);
+    });
+
+    test('resize event triggers label repositioning', () => {
+        document.body.innerHTML = '<a href="#" id="a">A</a>';
+        setRect(document.getElementById('a'), 10, 100);
+        loadHints();
+        startFollowLink();
+        expect(parseFloat(document.querySelector('.vise-hint-label').style.left)).toBe(100);
+        setRect(document.getElementById('a'), 10, 250);
+        window.dispatchEvent(new Event('resize'));
+        jest.runAllTimers();
+        expect(parseFloat(document.querySelector('.vise-hint-label').style.left)).toBe(250);
+    });
+
+    test('scroll/resize listeners are removed when overlay is destroyed', () => {
+        buildPage('<a href="#">A</a>');
+        loadHints();
+        startFollowLink();
+        const label = document.querySelector('.vise-hint-label');
+        expect(label).not.toBeNull();
+        // Destroy overlay via |escape.
+        followLink('|escape');
+        expect(document.getElementById('vise-hint-overlay')).toBeNull();
+        // After destruction, scroll/resize events must not recreate the
+        // overlay (no live listeners; nothing to render anyway).
+        setRect(document.querySelector('a'), 9999, 0);
+        window.dispatchEvent(new Event('scroll'));
+        window.dispatchEvent(new Event('resize'));
+        jest.runAllTimers();
+        expect(document.querySelectorAll('.vise-hint-label').length).toBe(0);
+        expect(document.getElementById('vise-hint-overlay')).toBeNull();
     });
 });

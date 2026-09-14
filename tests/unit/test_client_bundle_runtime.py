@@ -296,11 +296,13 @@ BUNDLE_WITH_BOOTSTRAP_TEST = textwrap.dedent(r"""
     //
     // We instrument the source so that hints.js's module-level read is
     // observable: replace the bundle's top-of-module hintFontSize read
-    // with a tracer that records the value seen.
+    // with a tracer that records the value seen. Match the *start* of
+    // the RHS expression (cfg.hintFontSize) so we don't depend on the
+    // exact `|| '14'` fallback formatting in hints.js.
     let valueSeenByHintsModule = null;
     const tracerInjected = SOURCE.replace(
-        'const hintFontSize = cfg_hints.hintFontSize',
-        'const hintFontSize = (globalThis.__sentry_test_hints = cfg_hints).hintFontSize'
+        'const hintFontSize = cfg.hintFontSize',
+        'const hintFontSize = (globalThis.__sentry_test_hints = cfg).hintFontSize'
     );
 
     let bundleError = null;

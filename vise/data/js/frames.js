@@ -123,6 +123,15 @@ function frameForId(id) {
     return undefined;
 }
 
+// True iff the frame has loaded vise-client.js and sent *register (so it
+// has a JS context able to dispatch our frame-message handlers). A
+// cross-origin frame has a working postMessage but no JS context — it
+// passes isPostableWindow but cannot reply to find_hints, so it must be
+// excluded from any "wait for replies" count.
+export function isRegisteredFrame(win) {
+    return win != null && frameMap.has(win);
+}
+
 export function registerFrames() {
     if (window.self !== window.top && window.location.href === 'about:blank') {
         // Workaround for an old Blink / QtWebEngine bug: in child frames, the

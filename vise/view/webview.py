@@ -56,7 +56,6 @@ _CYCLES_SIGNALS = (
     "toggle_full_screen", "dev_tools_requested",
 )
 
-
 class WebView(QWebEngineView):
     icon_changed = pyqtSignal(object)
     loading_status_changed = pyqtSignal(object)
@@ -198,6 +197,11 @@ class WebView(QWebEngineView):
     def load_started(self):
         self.loading_in_progress = True
         self.loading_status_changed.emit(True)
+        # Cancel any in-flight hint mode: if the JS context is about to be
+        # destroyed by this navigation, the next link_followed callback will
+        # never arrive and follow_link_pending would stay stuck truthy,
+        # swallowing every subsequent keystroke (including `f` and Escape).
+        self.follow_link_pending = None
 
     def load_progress(self, val):
         if val == 100 and self.loading_in_progress:
@@ -672,6 +676,18 @@ class WebView(QWebEngineView):
             self.main_window.show_status_message(
                 _("No match for %s!") % text, 5000, "error"
             )
+
+    @connect_signal()
+    def vise_signal_dropped(self, name):
+        """Recover when the JS bundle drops a Python signal (race, SPA nav, CSP).
+
+        Without this, ``follow_link_pending`` stays truthy and the user
+        cannot re-trigger hint mode until they navigate again. Only the
+        follow-link signals can leave us stuck; everything else is a
+        silent miss the user doesn't see.
+        """
+        if name in ("start_follow_link", "follow_link") and self.follow_link_pending is not None:
+            self.follow_link_pending = None
 
     def set_editable_text(self, text, frame_id, eid):
         python_to_js(self, "set_editable_text", text, frame_id, eid)

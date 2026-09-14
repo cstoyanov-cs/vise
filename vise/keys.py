@@ -26,24 +26,19 @@ all_keys = {
 
 SHIFT_BIT = Qt.KeyboardModifier.ShiftModifier.value  # 0x02000000, pas 0x20000000
 
-
 def only_modifiers(key):
     if isinstance(key, str):
         return False  # un caractère imprimable n'est jamais "que des modifiers"
     return (key & ~modifiers_mask) not in all_keys
 
-
 def key_from_event(ev):
     modifiers = int(ev.modifiers().value) & modifiers_mask
     return ev.key() | modifiers
 
-
 def key_to_string(key):
     return QKeySequence(key).toString().encode("utf-8", "ignore").decode("utf-8")
 
-
 normal_key_map, input_key_map = {}, {}
-
 
 def keyevent_to_code(ev):
     text = ev.text()
@@ -53,7 +48,6 @@ def keyevent_to_code(ev):
     if text and text.isprintable():
         return text
     return ev.key() | (modifiers & ~SHIFT_BIT)
-
 
 def parse_shortcut(s):
     if len(s) == 1 and s.isprintable():
@@ -71,7 +65,6 @@ def parse_shortcut(s):
     if is_symbol:
         key = bare
     return key
-
 
 def read_key_map(mode="normal"):
     km = mode + " mode keys"
@@ -99,10 +92,8 @@ def read_key_map(mode="normal"):
                     key_map[k] = action
     return key_map
 
-
 normal_key_map = read_key_map()
 input_key_map = read_key_map("insert")
-
 
 def passthrough_keys(widget):
     if widget is None:
@@ -115,7 +106,6 @@ def passthrough_keys(widget):
             return True
         p = p.parent()
     return False
-
 
 class KeyFilter(QObject):
     def __init__(self, parent=None):

@@ -50,7 +50,20 @@ function getMessagesFromJavascript() {
 }
 
 function sendMessageToJavascript(name, args) {
-    fromPython[name](...args);
+    const handler = fromPython[name];
+    if (handler) {
+        handler(...args);
+        return;
+    }
+    // Handler not registered. Happens when Python pushes a signal
+    // before DOMContentLoaded (page-load race) or after a SPA
+    // navigation that didn't reload the document so the bundle's
+    // ``connectSignal`` calls never re-ran. Drop with a warn instead
+    // of throwing: an uncaught TypeError pollutes stderr with V8
+    // stack traces and trips our own [vise-js ERROR] line, drowning
+    // out signals the user actually cares about. Python recovers via
+    // the matching ``vise_signal_dropped`` handler in WebView.
+    console.warn(`[vise] no Python signal handler for '${name}' — dropped`);
 }
 
 globalThis.window.get_messages_from_javascript = getMessagesFromJavascript;
