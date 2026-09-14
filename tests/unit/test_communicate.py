@@ -38,6 +38,40 @@ class TestPythonToJs:
         from vise.communicate import python_to_js
         assert callable(python_to_js)
 
+    def test_python_to_js_passes_result_callback(self):
+        """A result callback must be registered so JS delivery errors are surfaced."""
+        from vise.communicate import python_to_js
+        # `page` is a raw MagicMock (no `.page` attr) so python_to_js takes
+        # it as the page directly — mirrors the WebPage call path.
+        page = MagicMock(spec=["runJavaScript"])
+        python_to_js(page, "start_follow_link", "sametab")
+        page.runJavaScript.assert_called_once()
+        # Third positional arg of runJavaScript is the result handler.
+        callback = page.runJavaScript.call_args.args[2]
+        assert callable(callback)
+
+    def test_python_to_js_logs_undeliverable_handler(self, capsys):
+        """When the JS handler is missing, the error string is reported on stderr."""
+        from vise.communicate import python_to_js
+        page = MagicMock(spec=["runJavaScript"])
+        python_to_js(page, "start_follow_link", "sametab")
+        callback = page.runJavaScript.call_args.args[2]
+        # Simulate Qt returning the JS exception text.
+        callback("TypeError: fromPython.start_follow_link is not a function")
+        err = capsys.readouterr().err
+        assert "vise-bridge" in err
+        assert "start_follow_link" in err
+
+    def test_python_to_js_silent_on_successful_result(self, capsys):
+        """Successful deliveries must not pollute stderr."""
+        from vise.communicate import python_to_js
+        page = MagicMock(spec=["runJavaScript"])
+        python_to_js(page, "start_follow_link", "sametab")
+        callback = page.runJavaScript.call_args.args[2]
+        callback("ok")
+        callback(None)
+        assert capsys.readouterr().err == ""
+
 
 class TestConnectSignal:
     def test_connect_signal_raises_duplicate(self, mocker):

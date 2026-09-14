@@ -283,21 +283,116 @@ class TestAuthenticationRequired:
 
 
 class TestJavaScriptConsoleMessage:
-    """Console messages from JS are printed to stdout."""
+    """Console messages from JS are printed with a level prefix to stderr."""
 
     def test_console_message_is_printed(self, view_module, monkeypatch, capsys):
         page = _stub_page(view_module, monkeypatch)
-        page.javaScriptConsoleMessage("level", "msg", 42, "source.js")
-        out = capsys.readouterr().out
-        assert "source.js" in out
-        assert "42" in out
-        assert "msg" in out
+        page.javaScriptConsoleMessage(2, "msg", 42, "source.js")
+        err = capsys.readouterr().err
+        assert "source.js" in err
+        assert "42" in err
+        assert "msg" in err
+
+    def test_console_message_error_level_is_tagged(self, view_module, monkeypatch, capsys):
+        """JS errors must be visually distinct from info messages."""
+        page = _stub_page(view_module, monkeypatch)
+        # Qt level 2 == ErrorMessage
+        page.javaScriptConsoleMessage(2, "boom", 1, "hints.js")
+        err = capsys.readouterr().err
+        assert "ERROR" in err
+        assert "boom" in err
+        assert "hints.js" in err
+
+    def test_console_message_warning_level_is_tagged(
+        self, view_module, monkeypatch, capsys,
+    ):
+        """``VISE_DEBUG=1`` upgrades WARN (level 1) to visible."""
+        monkeypatch.setenv("VISE_DEBUG", "1")
+        page = _stub_page(view_module, monkeypatch)
+        page.javaScriptConsoleMessage(1, "careful", 1, "x.js")
+        err = capsys.readouterr().err
+        assert "WARN" in err
+
+    def test_console_message_warning_suppressed_without_debug_env(
+        self, view_module, monkeypatch, capsys,
+    ):
+        """WARN is silenced by default — sites like AliExpress spam it.
+
+        Default policy: ERROR surfaces always; WARN needs ``VISE_DEBUG>=1``;
+        INFO needs ``VISE_DEBUG>=2``. Without this, noisy 3rd-party
+        warnings (mixed content, sameSite cookies, parser-blocking
+        scripts) drown out the signals the user actually cares about.
+        """
+        monkeypatch.delenv("VISE_DEBUG", raising=False)
+        page = _stub_page(view_module, monkeypatch)
+        page.javaScriptConsoleMessage(1, "careful", 1, "x.js")
+        assert capsys.readouterr().err == ""
+
+    def test_console_message_warning_logged_with_debug_level_1(
+        self, view_module, monkeypatch, capsys,
+    ):
+        """``VISE_DEBUG=1`` enables WARN (but still silences INFO)."""
+        monkeypatch.setenv("VISE_DEBUG", "1")
+        page = _stub_page(view_module, monkeypatch)
+        page.javaScriptConsoleMessage(1, "careful", 1, "x.js")
+        err = capsys.readouterr().err
+        assert "WARN" in err
+        assert "careful" in err
+
+    def test_console_message_info_suppressed_with_debug_level_1(
+        self, view_module, monkeypatch, capsys,
+    ):
+        """``VISE_DEBUG=1`` is still below the INFO threshold."""
+        monkeypatch.setenv("VISE_DEBUG", "1")
+        page = _stub_page(view_module, monkeypatch)
+        page.javaScriptConsoleMessage(0, "hi", 1, "x.js")
+        assert capsys.readouterr().err == ""
+
+    def test_console_message_info_logged_with_debug_level_2(
+        self, view_module, monkeypatch, capsys,
+    ):
+        """``VISE_DEBUG=2`` opts the user into the full INFO stream."""
+        monkeypatch.setenv("VISE_DEBUG", "2")
+        page = _stub_page(view_module, monkeypatch)
+        page.javaScriptConsoleMessage(0, "hi", 1, "x.js")
+        err = capsys.readouterr().err
+        assert "INFO" in err
+        assert "hi" in err
+
+    def test_console_message_error_unaffected_by_debug_level(
+        self, view_module, monkeypatch, capsys,
+    ):
+        """ERROR must surface at every verbosity level (incl. unset)."""
+        monkeypatch.delenv("VISE_DEBUG", raising=False)
+        page = _stub_page(view_module, monkeypatch)
+        page.javaScriptConsoleMessage(2, "boom", 1, "x.js")
+        assert "ERROR" in capsys.readouterr().err
+
+    def test_console_message_accepts_enum_like_level(
+        self, view_module, monkeypatch, capsys,
+    ):
+        """PyQt6 passes ``QWebEnginePage.JavaScriptConsoleMessageLevel`` enums.
+
+        Reproduces the production bug that surfaced as ``[vise-js LOG]``
+        for every message: ``level`` is an enum, not an int, so a dict
+        keyed by int misses every lookup. The fix unwraps ``.value``.
+        """
+
+        class FakeEnum:
+            def __init__(self, v):
+                self.value = v
+
+        monkeypatch.delenv("VISE_DEBUG", raising=False)
+        page = _stub_page(view_module, monkeypatch)
+        page.javaScriptConsoleMessage(FakeEnum(2), "boom", 1, "hints.js")
+        err = capsys.readouterr().err
+        assert "ERROR" in err, f"enum level 2 must tag as ERROR, got: {err!r}"
 
     def test_console_message_os_error_swallowed(self, view_module, monkeypatch):
-        """If stdout is closed, ``print`` raises — must not crash."""
+        """If stderr is closed, ``print`` raises — must not crash."""
         page = _stub_page(view_module, monkeypatch)
         monkeypatch.setattr("builtins.print", MagicMock(side_effect=OSError("closed")))
-        page.javaScriptConsoleMessage("level", "msg", 42, "source.js")
+        page.javaScriptConsoleMessage(2, "msg", 42, "source.js")
 
 
 class TestDownloadsCallback:

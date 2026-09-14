@@ -46,14 +46,32 @@ Python->JS flow:
 """
 
 import json
+import sys
 
 from PyQt6.QtWebEngineCore import QWebEngineScript
-
 
 # Registry of JS->Python handlers keyed by signal name. Populated by
 # the ``connect_signal`` decorator; read by ``js_to_python`` when a
 # message arrives from JS.
 from_js: dict[str, str] = {}
+
+
+def _log_undeliverable(name, result):
+    """Surface JS-side delivery failures on stderr.
+
+    ``runJavaScript`` swallows V8 exceptions and hands the error string
+    to the result callback instead. Without this hook, a missing handler
+    (``fromPython[name] is not a function``) or a CSP-blocked bundle
+    leaves the user with a silent, dead keystroke — the symptom that
+    prompted this hook. Successful results (None, "ok") are no-ops.
+    """
+    if not isinstance(result, str):
+        return
+    if 'is not a function' in result or 'ReferenceError' in result:
+        print(
+            f"[vise-bridge] failed to deliver '{name}' to JS: {result}",
+            file=sys.stderr, flush=True,
+        )
 
 
 def python_to_js(page_or_tab, name, *args):
@@ -67,8 +85,8 @@ def python_to_js(page_or_tab, name, *args):
     page.runJavaScript(
         f'window.send_message_to_javascript({json.dumps(name)}, {json.dumps(args)})',
         QWebEngineScript.ScriptWorldId.ApplicationWorld,
+        lambda result, n=name: _log_undeliverable(n, result),
     )
-
 
 def js_to_python(page, name, args):
     """Dispatch a single JS->Python message.
@@ -90,7 +108,6 @@ def js_to_python(page, name, args):
         return
     func = getattr(func, 'emit', func)
     func(*args)
-
 
 def connect_signal(name=None, func_name=None):
     """Decorator that registers a method as the JS->Python handler for

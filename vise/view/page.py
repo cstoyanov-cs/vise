@@ -3,6 +3,8 @@
 # License: GPL v3 Copyright: 2015, Kovid Goyal <kovid at kovidgoyal.net>
 
 import json
+import os
+import sys
 
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWebEngineCore import (
@@ -19,8 +21,6 @@ from ..utils import safe_disconnect
 from .alert import Alert
 
 certificate_error_domains: set[str] = set()
-
-
 
 class WebPage(QWebEnginePage):
     """Per-tab web page. Bridges JS<->Python via the title-token polling
@@ -78,9 +78,44 @@ class WebPage(QWebEnginePage):
             return func(self.parent(), data, *args, **kw)
         raise KeyError("No callback named %r is registered" % name)
 
+    # QtWebEngine console-message level values (JavaScriptConsoleMessage).
+    # See: https://doc.qt.io/qt-6/qwebenginepage.html#JavaScriptConsoleMessageLevel-enum
+    _LEVEL_NAMES = {0: "INFO", 1: "WARN", 2: "ERROR"}
+
+    # Verbosity scale: ERROR surfaces always; WARN needs VISE_DEBUG>=1;
+    # INFO needs VISE_DEBUG>=2. AliExpress-class sites spam both
+    # ``console.warn`` (mixed content, sameSite cookies, parser-blocking
+    # scripts) and ``console.log`` (per-render analytics), so anything
+    # below ERROR is opt-in.
+    _DEBUG_WILDCARD = ("1", "2")
+
     def javaScriptConsoleMessage(self, level, msg, linenumber, source_id):
+        """Surface JS console output on stderr with a level tag.
+
+        Stderr (not stdout) so it stays visible when users launch vise
+        from a GUI launcher that captures only stdout. Verbosity is
+        controlled by ``VISE_DEBUG``: unset → ERROR only; ``1`` →
+        ERROR + WARN; ``2`` → ERROR + WARN + INFO.
+        """
+        # PyQt6 passes an enum (``QWebEnginePage.JavaScriptConsoleMessageLevel.InfoMessageLevel``)
+        # not an int; ``.value`` yields the int. Tests pass ints directly,
+        # so ``hasattr`` covers both shapes without needing a real Qt import.
+        level_int = level.value if hasattr(level, "value") else int(level)
+        level_name = self._LEVEL_NAMES.get(level_int, "LOG")
+
+        if level_int == 1:
+            debug = os.environ.get("VISE_DEBUG", "")
+            if debug not in self._DEBUG_WILDCARD:
+                return
+        elif level_int <= 0:
+            if os.environ.get("VISE_DEBUG") != "2":
+                return
+
         try:
-            print("%s:%s: %s" % (source_id, linenumber, msg))
+            print(
+                f"[vise-js {level_name}] {source_id}:{linenumber} {msg}",
+                file=sys.stderr, flush=True,
+            )
         except OSError:
             pass
 
@@ -140,5 +175,4 @@ class WebPage(QWebEnginePage):
 
             traceback.print_exc()
         return True
-
 

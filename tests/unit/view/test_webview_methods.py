@@ -284,6 +284,59 @@ class TestStartFollowLink:
 
 
 # ---------------------------------------------------------------------------
+# load_started / load_finished
+# ---------------------------------------------------------------------------
+
+
+class TestLoadStarted:
+    """``load_started`` cancels any in-flight hint mode.
+
+    Without this reset, the ``follow_link_pending`` flag stays truthy when
+    JS context is destroyed mid-flow (page redirect, mouse-click nav,
+    iframe navigation): every subsequent keystroke is swallowed by the
+    follow-link handler and the user cannot re-trigger ``f``.
+    """
+
+    def test_clears_follow_link_pending(self, web_view):
+        web_view.follow_link_pending = "sametab"
+        web_view.load_started()
+        assert web_view.follow_link_pending is None
+
+    def test_noop_when_no_pending_state(self, web_view):
+        web_view.follow_link_pending = None
+        web_view.load_started()
+        assert web_view.follow_link_pending is None
+
+
+class TestViseSignalDropped:
+    """The JS bundle notifies Python when a Python→JS signal lands on a
+    missing handler (race condition, SPA nav, CSP block). Without this
+    recovery path the ``follow_link_pending`` flag stays truthy and the
+    user cannot re-trigger hint mode until they navigate again.
+    """
+
+    def test_clears_pending_when_start_follow_link_dropped(self, web_view):
+        web_view.follow_link_pending = "sametab"
+        web_view.vise_signal_dropped("start_follow_link")
+        assert web_view.follow_link_pending is None
+
+    def test_clears_pending_when_follow_link_dropped(self, web_view):
+        web_view.follow_link_pending = "newtab"
+        web_view.vise_signal_dropped("follow_link")
+        assert web_view.follow_link_pending is None
+
+    def test_ignored_for_unrelated_signals(self, web_view):
+        web_view.follow_link_pending = "sametab"
+        web_view.vise_signal_dropped("some_other_signal")
+        assert web_view.follow_link_pending == "sametab"
+
+    def test_noop_when_no_pending_state(self, web_view):
+        web_view.follow_link_pending = None
+        web_view.vise_signal_dropped("start_follow_link")
+        assert web_view.follow_link_pending is None
+
+
+# ---------------------------------------------------------------------------
 # exit_full_screen
 # ---------------------------------------------------------------------------
 

@@ -117,6 +117,30 @@ describe('communicate.js bridge contract', () => {
         expect(() => connectSignal('once_signal', () => {})).toThrow();
     });
 
+    test('sendMessageToJascript drops unknown signal without throwing', async () => {
+        // Reproduces the production bug: Python pushed a signal whose JS
+        // handler wasn't connected yet (page-load race, SPA navigation,
+        // CSP block). The function must drop it silently rather than
+        // throw an uncaught TypeError that pollutes stderr and prevents
+        // recovery — Python only knows the delivery failed when no
+        // link_followed arrives.
+        const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+        await loadModule();
+        expect(() =>
+            globalThis.window.send_message_to_javascript('no_such_signal', ['x'])
+        ).not.toThrow();
+        expect(warnSpy).toHaveBeenCalled();
+        warnSpy.mockRestore();
+    });
+
+    test('sendMessageToJascript still invokes registered handler', async () => {
+        const { connectSignal } = await loadModule();
+        const cb = jest.fn();
+        connectSignal('known_signal', cb);
+        globalThis.window.send_message_to_javascript('known_signal', ['arg']);
+        expect(cb).toHaveBeenCalledWith('arg');
+    });
+
     test('bundle compiles syntactically (regression for build errors)', () => {
         // Source must be valid JS — catches typos in the title-toggle
         // helper that wouldn't show up in runtime tests.
